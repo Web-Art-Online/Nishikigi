@@ -97,12 +97,34 @@ async def screenshoot(id: int, output_path: str):
             }
         """
         )
-        print(h)
+
+        # 如果页面高度过高，缩放页面以避免截图超时
+        if h and h > 6000:
+            scale = max(0.5, min(1.0, 6000 / h))
+            h = await page.evaluate(
+                """
+                (scale) => {
+                    document.body.style.zoom = scale;
+                    const doc = document.documentElement;
+                    const bod = document.body;
+                    const h = Math.max(
+                        doc.scrollHeight, doc.offsetHeight, doc.clientHeight,
+                        bod.scrollHeight, bod.offsetHeight, bod.clientHeight
+                    ) - 100;
+                    const el = document.querySelector('.blur-bg');
+                    el.style.height = h + 'px';
+                    return h;
+                }
+            """,
+                scale,
+            )
+
         await page.screenshot(
             type="png",
             full_page=True,
             path=output_path,
             omit_background=True,
             animations="disabled",
+            timeout=120000,
         )
         await browser.close()
