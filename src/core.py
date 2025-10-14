@@ -1,13 +1,16 @@
 import asyncio
 from datetime import datetime, time, date
 import os
+import secrets
 import shutil
 import time
 from typing import Sequence
-from datetime import datetime
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.templating import Jinja2Templates
 from uvicorn import Config, Server
 import config
 from models import Article, Session
@@ -37,6 +40,31 @@ bot = Bot(
 token = hex(random.randint(0, 2 << 128))[2:]
 
 app = FastAPI()
+
+templates = Jinja2Templates(directory="templates/web")
+security = HTTPBasic(auto_error=False)
+
+
+def require_basic(credentials: HTTPBasicCredentials | None = Depends(security)) -> None:
+    if not (config.WEB_USERNAME and config.WEB_PASSWORD):
+        return
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    username_valid = secrets.compare_digest(config.WEB_USERNAME, credentials.username)
+    password_valid = secrets.compare_digest(config.WEB_PASSWORD, credentials.password)
+
+    if not (username_valid and password_valid):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
 # workers 必须为 1. 因为没有多进程数据同步.
 server = Server(Config(app=app, host="localhost", port=config.PORT, workers=1))
@@ -83,6 +111,209 @@ start_time = time.time()
 lock = asyncio.Lock()
 
 scheduler = AsyncIOScheduler()
+
+
+def _article_status(article: Article) -> str:
+    match article.tid:
+        case "wait":
+            return "待审核"
+        case "queue":
+            return "待发送"
+        case "refused":
+            return "已驳回"
+        case None:
+            return "草稿"
+        case _:
+            return "已推送"
+
+
+def _serialize_article(article: Article) -> dict:
+    image_path = f"./data/{article.id}/image.png"
+    return {
+        "id": article.id,
+        "sender_id": article.sender_id,
+        "sender_name": article.sender_name,
+        "is_anonymous": article.sender_name is None,
+        "single": article.single,
+        "time": article.time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": _article_status(article),
+        "image_url": get_file_url(image_path) if os.path.exists(image_path) else None,
+    }
+
+
+async def approve_articles(
+    ids: Sequence[int | str], *, source: str | None = None
+) -> tuple[list[str], list[str]]:
+    success: list[str] = []
+    errors: list[str] = []
+    async with lock:
+        queue_modified = False
+        for raw_id in ids:
+            try:
+                article_id = int(raw_id)
+            except (TypeError, ValueError):
+                errors.append(f"投稿 {raw_id} 不是有效编号")
+                continue
+
+            article = Article.get_or_none(
+                (Article.id == article_id) & (Article.tid == "wait")
+            )
+            if not article:
+                errors.append(f"投稿 #{article_id} 不存在或已通过审核")
+                continue
+
+            if source:
+                await bot.send_group(
+                    config.GROUP, f"{source} 审核通过投稿 #{article_id}"
+                )
+
+            if article.single:
+                tid = await publish([article_id])
+                if source:
+                    await bot.send_group(
+                        config.GROUP,
+                        f"{source} 已单独推送投稿 #{article_id}\ntid: {tid}",
+                    )
+                success.append(f"投稿 #{article_id} 已单独推送\ntid: {tid}")
+                continue
+
+            await bot.send_private(
+                article.sender_id,
+                f"您的投稿 {article} 已通过审核, 正在队列中等待发送",
+            )
+            Article.update({Article.tid: "queue"}).where(Article.id == article_id).execute()
+            queue_modified = True
+            success.append(f"投稿 #{article_id} 已加入发送队列")
+
+        if queue_modified:
+            queued_articles = list(
+                Article.select()
+                .where(Article.tid == "queue")
+                .order_by(Article.id.asc())
+                .limit(config.QUEUE)
+            )
+            if len(queued_articles) < config.QUEUE:
+                success.append(
+                    f"当前队列中有{len(queued_articles)}个稿件, 暂不推送"
+                )
+            else:
+                ids_to_publish = [a.id for a in queued_articles]
+                tid = await publish(ids_to_publish)
+                if source:
+                    await bot.send_group(
+                        config.GROUP,
+                        f"{source} 触发推送 {ids_to_publish}\ntid: {tid}",
+                    )
+                success.append(f"已推送{ids_to_publish}\ntid: {tid}")
+
+        await update_name()
+
+    return success, errors
+
+
+async def reject_article(
+    article_id: int, reason: str, *, source: str | None = None
+) -> tuple[str | None, str | None]:
+    reason = reason.strip()
+    if not reason:
+        return None, "驳回理由不能为空"
+
+    async with lock:
+        article = Article.get_or_none(
+            (Article.id == article_id) & (Article.tid == "wait")
+        )
+        if article is None:
+            return None, f"投稿 #{article_id} 不存在或已通过审核"
+
+        Article.update({"tid": "refused"}).where(Article.id == article_id).execute()
+        await bot.send_private(
+            article.sender_id,
+            f"抱歉, 你的投稿 #{article_id} 已被管理员驳回😵‍💫 理由: {reason}",
+        )
+        if source:
+            await bot.send_group(
+                config.GROUP, f"{source} 驳回了投稿 #{article_id}: {reason}"
+            )
+        await update_name()
+
+    return f"已驳回投稿 #{article_id}", None
+
+
+@app.get("/", include_in_schema=False)
+async def root_redirect():
+    return RedirectResponse(url="/web/articles")
+
+
+@app.get("/web/articles", response_class=HTMLResponse, name="web_articles")
+async def web_articles(
+    request: Request, _: None = Depends(require_basic)
+):
+    waiting = (
+        Article.select()
+        .where(Article.tid == "wait")
+        .order_by(Article.id.asc())
+    )
+    queue_items = (
+        Article.select()
+        .where(Article.tid == "queue")
+        .order_by(Article.id.asc())
+    )
+
+    params = request.query_params
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "waiting_articles": [_serialize_article(a) for a in waiting],
+            "queue_articles": [_serialize_article(a) for a in queue_items],
+            "queue_limit": config.QUEUE,
+            "message": params.get("message"),
+            "error": params.get("error"),
+        },
+    )
+
+
+@app.post(
+    "/web/articles/{article_id}/approve",
+    name="web_accept_article",
+)
+async def web_accept_article(
+    article_id: int,
+    request: Request,
+    _: None = Depends(require_basic),
+):
+    success, errors = await approve_articles([article_id], source="WebUI")
+    redirect_url = request.url_for("web_articles")
+    params: dict[str, str] = {}
+    if errors:
+        params["error"] = "；".join(errors)
+    if success:
+        params["message"] = "；".join(success)
+    if params:
+        redirect_url = f"{redirect_url}?{urlencode(params)}"
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+
+@app.post(
+    "/web/articles/{article_id}/reject",
+    name="web_reject_article",
+)
+async def web_reject_article(
+    article_id: int,
+    request: Request,
+    reason: str = Form(..., min_length=1),
+    _: None = Depends(require_basic),
+):
+    success, error = await reject_article(article_id, reason, source="WebUI")
+    redirect_url = request.url_for("web_articles")
+    params: dict[str, str] = {}
+    if error:
+        params["error"] = error
+    if success:
+        params["message"] = success
+    if params:
+        redirect_url = f"{redirect_url}?{urlencode(params)}"
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @bot.on_error()
@@ -392,51 +623,16 @@ async def recall(r: PrivateRecall):
     targets=[config.GROUP],
 )
 async def accept(msg: GroupMessage):
-    async with lock:
-        parts = msg.raw_message.split(" ")
-        if len(parts) < 2:
-            await msg.reply("请带上要通过的投稿编号")
-            return
+    parts = msg.raw_message.split(" ")
+    if len(parts) < 2:
+        await msg.reply("请带上要通过的投稿编号")
+        return
 
-        ids = parts[1:]
-        flag = False  # 只有有投稿加入队列时才判断是否推送
-        for id in ids:
-            article = Article.get_or_none((Article.id == id) & (Article.tid == "wait"))
-            if not article:
-                await msg.reply(f"投稿 #{id} 不存在或已通过审核")
-                continue
-            if article.single:
-                await msg.reply(f"开始推送 #{id}")
-                await publish([id])
-                await msg.reply(f"投稿 #{id} 已经单发")
-                continue
-            else:
-                await bot.send_private(
-                    article.sender_id,
-                    f"您的投稿 {article} 已通过审核, 正在队列中等待发送",
-                )
-            flag = True
-            Article.update({Article.tid: "queue"}).where(Article.id == id).execute()
-
-        if flag:
-            articles = (
-                Article.select()
-                .where(Article.tid == "queue")
-                .order_by(Article.id.asc())
-                .limit(config.QUEUE)
-            )
-            if len(articles) < config.QUEUE:
-                await msg.reply(f"当前队列中有{len(articles)}个稿件, 暂不推送")
-            else:
-                await msg.reply(
-                    f"队列已积压{len(articles)}个稿件, 将推送前{config.QUEUE}个稿件..."
-                )
-                tid = await publish(list(map(lambda a: a.id, articles)))
-                await msg.reply(
-                    f"已推送{list(map(lambda a: a.id, articles))}\ntid: {tid}"
-                )
-
-        await update_name()
+    success, errors = await approve_articles(parts[1:])
+    for err in errors:
+        await msg.reply(err)
+    for text in success:
+        await msg.reply(text)
 
 
 @bot.on_cmd(
@@ -445,27 +641,24 @@ async def accept(msg: GroupMessage):
     targets=[config.GROUP],
 )
 async def refuse(msg: GroupMessage):
-    async with lock:
-        parts = msg.raw_message.split(" ")
-        if len(parts) < 3:
-            await msg.reply("请带上要驳回的投稿和理由")
-            return
+    parts = msg.raw_message.split(" ")
+    if len(parts) < 3:
+        await msg.reply("请带上要驳回的投稿和理由")
+        return
 
-        id = parts[1]
-        reason = parts[2:]
-        article = Article.get_or_none((Article.id == id) & (Article.tid == "wait"))
-        if article == None:
-            await msg.reply(f"投稿 #{id} 不存在或已通过审核")
-            return
+    try:
+        article_id = int(parts[1])
+    except ValueError:
+        await msg.reply(f"投稿 {parts[1]} 不是有效编号")
+        return
 
-        Article.update({"tid": "refused"}).where(Article.id == id).execute()
-        await bot.send_private(
-            article.sender_id,
-            f"抱歉, 你的投稿 #{id} 已被管理员驳回😵‍💫 理由: {' '.join(reason)}",
-        )
-        await msg.reply(f"已驳回投稿 #{id}")
-
-        await update_name()
+    reason = " ".join(parts[2:])
+    success, error = await reject_article(article_id, reason)
+    if error:
+        await msg.reply(error)
+        return
+    if success:
+        await msg.reply(success)
 
 
 @bot.on_cmd(
