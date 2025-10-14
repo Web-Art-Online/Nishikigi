@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投稿审核面板</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+        }
+        body {
+            margin: 0;
+            font-family: "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: linear-gradient(135deg, #f3f5ff 0%, #eef6ff 100%);
+            color: #1d1d1f;
+            min-height: 100vh;
+        }
+        main {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 32px 20px 60px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+        .actions button {
+            padding: 10px 18px;
+            border-radius: 999px;
+            border: none;
+            background: #2563eb;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .actions button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.2);
+        }
+        .alert {
+            padding: 14px 18px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .alert.success {
+            background: rgba(22, 163, 74, 0.12);
+            color: #166534;
+        }
+        .alert.error {
+            background: rgba(220, 38, 38, 0.12);
+            color: #b91c1c;
+        }
+        section {
+            margin-top: 32px;
+        }
+        .section-header {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .section-header h2 {
+            margin: 0;
+            font-size: 22px;
+        }
+        .section-header span {
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .card-grid {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.85);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            backdrop-filter: blur(12px);
+        }
+        .meta {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 14px;
+        }
+        .meta-line {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #2563eb;
+            color: #fff;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            letter-spacing: 0.05em;
+        }
+        .status {
+            color: #2563eb;
+            font-weight: 600;
+        }
+        .tag {
+            background: rgba(37, 99, 235, 0.12);
+            color: #1d4ed8;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 12px;
+        }
+        .tag.anonymous {
+            background: rgba(124, 58, 237, 0.12);
+            color: #6d28d9;
+        }
+        .muted {
+            color: #6b7280;
+        }
+        .preview {
+            width: 100%;
+            border-radius: 16px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+            background: #f9fafb;
+        }
+        .placeholder {
+            border-radius: 16px;
+            padding: 40px 12px;
+            text-align: center;
+            color: #9ca3af;
+            background: repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 10px, #e5e7eb 10px, #e5e7eb 20px);
+        }
+        .card-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .card-actions form {
+            display: flex;
+            gap: 10px;
+        }
+        .card-actions input[type="text"] {
+            flex: 1;
+            border-radius: 10px;
+            border: 1px solid #d1d5db;
+            padding: 8px 10px;
+            font-size: 14px;
+        }
+        .card-actions button {
+            border-radius: 10px;
+            border: none;
+            padding: 9px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .card-actions button.primary {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+        }
+        .card-actions button.danger {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: #fff;
+        }
+        .card-actions button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 18px rgba(0, 0, 0, 0.12);
+        }
+        .queue-list {
+            display: grid;
+            gap: 12px;
+        }
+        .queue-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.82);
+            border-radius: 14px;
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+        }
+        .queue-item a {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .queue-item a:hover {
+            text-decoration: underline;
+        }
+        .empty {
+            margin: 0;
+            padding: 24px;
+            text-align: center;
+            color: #9ca3af;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 16px;
+        }
+        footer {
+            margin-top: 60px;
+            text-align: center;
+            color: #9ca3af;
+            font-size: 13px;
+        }
+        @media (max-width: 720px) {
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            .card-actions {
+                flex-direction: column;
+            }
+            .card-actions form {
+                flex-direction: column;
+            }
+            .card-actions input[type="text"] {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <h1>投稿审核面板</h1>
+        <div class="actions">
+            <form method="get" action="{{ request.url_for('web_articles') }}">
+                <button type="submit">刷新列表</button>
+            </form>
+        </div>
+    </header>
+
+    {% if message %}
+        <div class="alert success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+        <div class="alert error">{{ error }}</div>
+    {% endif %}
+
+    <section>
+        <div class="section-header">
+            <h2>待审核投稿</h2>
+            <span>{{ waiting_articles|length }} 条</span>
+        </div>
+        {% if waiting_articles %}
+            <div class="card-grid">
+                {% for article in waiting_articles %}
+                    <article class="card">
+                        <div class="meta">
+                            <div class="meta-line">
+                                <span class="badge">#{{ article.id }}</span>
+                                <span class="status">{{ article.status }}</span>
+                                {% if article.single %}
+                                    <span class="tag">要求单发</span>
+                                {% endif %}
+                                {% if article.is_anonymous %}
+                                    <span class="tag anonymous">匿名</span>
+                                {% endif %}
+                            </div>
+                            <div class="meta-line">
+                                <span>{{ article.sender_name if not article.is_anonymous else "匿名投稿" }}</span>
+                                <span class="muted">{{ article.sender_id }}</span>
+                            </div>
+                            <div class="meta-line muted">{{ article.time }}</div>
+                        </div>
+                        {% if article.image_url %}
+                            <img class="preview" src="{{ article.image_url }}" alt="投稿预览图">
+                        {% else %}
+                            <div class="placeholder">暂无预览图</div>
+                        {% endif %}
+                        <div class="card-actions">
+                            <form method="post" action="{{ request.url_for('web_accept_article', article_id=article.id) }}">
+                                <button type="submit" class="primary">通过</button>
+                            </form>
+                            <form method="post" action="{{ request.url_for('web_reject_article', article_id=article.id) }}">
+                                <input type="text" name="reason" placeholder="驳回理由" required>
+                                <button type="submit" class="danger">驳回</button>
+                            </form>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">暂无待审核投稿。</p>
+        {% endif %}
+    </section>
+
+    <section>
+        <div class="section-header">
+            <h2>待推送队列</h2>
+            <span>{{ queue_articles|length }} / {{ queue_limit }}</span>
+        </div>
+        {% if queue_articles %}
+            <div class="queue-list">
+                {% for article in queue_articles %}
+                    <div class="queue-item">
+                        <div>
+                            <div class="meta-line">
+                                <span class="badge">#{{ article.id }}</span>
+                                {% if article.is_anonymous %}
+                                    <span class="tag anonymous">匿名</span>
+                                {% endif %}
+                                {% if article.single %}
+                                    <span class="tag">要求单发</span>
+                                {% endif %}
+                            </div>
+                            <div class="meta-line">
+                                <span>{{ article.sender_name if not article.is_anonymous else "匿名投稿" }}</span>
+                                <span class="muted">{{ article.sender_id }}</span>
+                            </div>
+                            <div class="meta-line muted">{{ article.time }}</div>
+                        </div>
+                        {% if article.image_url %}
+                            <a href="{{ article.image_url }}" target="_blank" rel="noopener">查看预览</a>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">队列中暂无稿件。</p>
+        {% endif %}
+    </section>
+
+    <footer>Powered by Nishikigi</footer>
+</main>
+</body>
+</html>

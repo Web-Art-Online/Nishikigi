@@ -21,3 +21,6 @@ STATUS_ID = [400, 382, 383, 401, 400, 380, 381, 379, 376, 378, 377, 336]
 AGENT_ROUTER_BASE = os.getenv("AGENT_ROUTER_BASE", "")
 AGENT_ROUTER_KEY = os.getenv("AGENT_ROUTER_KEY", "")
 AGENT_MODEL = os.getenv("AGENT_MODEL", "gpt-4o-mini")
+
+WEB_USERNAME = os.getenv("WEB_USERNAME", "")
+WEB_PASSWORD = os.getenv("WEB_PASSWORD", "")
