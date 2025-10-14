@@ -6,8 +6,9 @@ import time
 from typing import Sequence
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 from uvicorn import Config, Server
 import config
 from models import Article, Session
@@ -30,6 +31,8 @@ import httpx
 import json
 import hashlib
 
+from pydantic import BaseModel
+
 bot = Bot(
     ws_uri=config.WS_URL, token=config.ACCESS_TOKEN, log_level="DEBUG", msg_cd=0.5
 )
@@ -37,6 +40,8 @@ bot = Bot(
 token = hex(random.randint(0, 2 << 128))[2:]
 
 app = FastAPI()
+
+templates = Jinja2Templates(directory="templates")
 
 # workers 必须为 1. 因为没有多进程数据同步.
 server = Server(Config(app=app, host="localhost", port=config.PORT, workers=1))
@@ -46,11 +51,184 @@ def get_file_url(path: str):
     return f"http://{config.HOST}:{config.PORT}/image?p={path}&t={token}"
 
 
+def require_review_token(token: str | None = Query(None)) -> str | None:
+    if config.REVIEW_TOKEN and token != config.REVIEW_TOKEN:
+        raise HTTPException(status_code=401, detail="无权访问")
+    return token
+
+
+def serialize_article(article: Article) -> dict:
+    image_path = f"./data/{article.id}/image.png"
+    return {
+        "id": article.id,
+        "sender_id": article.sender_id,
+        "sender_name": article.sender_name,
+        "anonymous": article.sender_name is None,
+        "single": article.single,
+        "submitted_at": article.time.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": article.tid,
+        "image_url": get_file_url(image_path) if os.path.exists(image_path) else None,
+    }
+
+
+class RejectRequest(BaseModel):
+    reason: str
+
+
+async def approve_article_via_api(article_id: int) -> dict:
+    article = Article.get_or_none((Article.id == article_id) & (Article.tid == "wait"))
+    if not article:
+        raise HTTPException(status_code=404, detail="投稿不存在或已完成审核")
+
+    if article.single:
+        tid = await publish([article_id])
+        await update_name()
+        return {
+            "id": article_id,
+            "status": "published",
+            "single": True,
+            "message": f"投稿 #{article_id} 已单独推送",
+            "auto_published": [article_id],
+            "queue_length": Article.select()
+            .where(Article.tid == "queue")
+            .count(),
+            "tid": tid,
+        }
+
+    await bot.send_private(
+        article.sender_id, f"您的投稿 {article} 已通过审核, 正在队列中等待发送"
+    )
+    Article.update({Article.tid: "queue"}).where(Article.id == article_id).execute()
+
+    queue_candidates = list(
+        Article.select()
+        .where(Article.tid == "queue")
+        .order_by(Article.id.asc())
+        .limit(config.QUEUE)
+    )
+
+    auto_published: list[int] = []
+    tid: str | None = None
+    if len(queue_candidates) >= config.QUEUE and config.QUEUE > 0:
+        auto_published = [candidate.id for candidate in queue_candidates]
+        tid = await publish(auto_published)
+
+    queue_length = (
+        Article.select().where(Article.tid == "queue").count() if config.QUEUE > 0 else 0
+    )
+
+    await update_name()
+
+    if auto_published:
+        if article_id in auto_published:
+            message = (
+                f"投稿 #{article_id} 已通过审核, 并自动推送稿件 {auto_published}\n"
+                f"tid: {tid}"
+            )
+            status = "published"
+        else:
+            message = (
+                f"投稿 #{article_id} 已通过审核, 队列触发自动推送稿件 {auto_published}\n"
+                f"当前队列 {queue_length}/{config.QUEUE}"
+            )
+            status = "queued"
+    else:
+        message = (
+            f"投稿 #{article_id} 已通过审核, 已加入待推送队列"
+            f"(当前 {queue_length}/{config.QUEUE})"
+            if config.QUEUE
+            else f"投稿 #{article_id} 已通过审核"
+        )
+        status = "queued"
+
+    return {
+        "id": article_id,
+        "status": status,
+        "single": False,
+        "auto_published": auto_published,
+        "queue_length": queue_length,
+        "tid": tid,
+        "message": message,
+    }
+
+
+async def reject_article_via_api(article_id: int, reason: str) -> dict:
+    reason = reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="请提供驳回理由")
+
+    article = Article.get_or_none((Article.id == article_id) & (Article.tid == "wait"))
+    if not article:
+        raise HTTPException(status_code=404, detail="投稿不存在或已完成审核")
+
+    Article.update({Article.tid: "refused"}).where(Article.id == article_id).execute()
+    await bot.send_private(
+        article.sender_id,
+        f"抱歉, 你的投稿 #{article_id} 已被管理员驳回😵‍💫 理由: {reason}",
+    )
+
+    await update_name()
+
+    return {
+        "id": article_id,
+        "status": "rejected",
+        "message": f"已驳回投稿 #{article_id}",
+    }
+
+
 @app.get("/image")
 def get_image(p: str, t: str):
     if t != token:
         raise HTTPException(status_code=401, detail="Nothing.")
     return FileResponse(path=p)
+
+
+@app.get("/review", response_class=HTMLResponse)
+async def review_page(request: Request, token: str | None = Query(None)):
+    require_review_token(token)
+    return templates.TemplateResponse(
+        "review.html",
+        {
+            "request": request,
+            "token": token or "",
+            "requires_token": bool(config.REVIEW_TOKEN),
+            "queue_limit": config.QUEUE,
+        },
+    )
+
+
+@app.get("/api/review/articles")
+async def list_pending_articles(token: str | None = Depends(require_review_token)):
+    waiting_articles = (
+        Article.select()
+        .where(Article.tid == "wait")
+        .order_by(Article.time.asc())
+    )
+    queue_articles = list(
+        Article.select().where(Article.tid == "queue").order_by(Article.id.asc())
+    )
+    return {
+        "items": [serialize_article(article) for article in waiting_articles],
+        "queue": [article.id for article in queue_articles],
+        "queue_length": len(queue_articles),
+        "queue_limit": config.QUEUE,
+    }
+
+
+@app.post("/api/review/articles/{article_id}/approve")
+async def approve_article(article_id: int, token: str | None = Depends(require_review_token)):
+    async with lock:
+        return await approve_article_via_api(article_id)
+
+
+@app.post("/api/review/articles/{article_id}/reject")
+async def reject_article(
+    article_id: int,
+    payload: RejectRequest,
+    token: str | None = Depends(require_review_token),
+):
+    async with lock:
+        return await reject_article_via_api(article_id, payload.reason)
 
 
 # 创建投稿数据表

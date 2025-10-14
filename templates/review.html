@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nishikigi 审核面板</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #f5f7fb;
+            --card-bg: #ffffff;
+            --border: rgba(15, 23, 42, 0.08);
+            --accent: #6366f1;
+            --accent-hover: #4f46e5;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --text: #1f2937;
+            --muted: #6b7280;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f172a;
+                --card-bg: #111c34;
+                --border: rgba(148, 163, 184, 0.18);
+                --text: #e2e8f0;
+                --muted: #94a3b8;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 20px clamp(16px, 5vw, 48px);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(20px, 3vw, 28px);
+            font-weight: 700;
+        }
+
+        .queue-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .queue-status span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(99, 102, 241, 0.08);
+            border-radius: 999px;
+            padding: 6px 14px;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .queue-ids {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .refresh-btn {
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--accent);
+        }
+
+        .refresh-btn:hover:not(:disabled) {
+            background: rgba(99, 102, 241, 0.18);
+        }
+
+        main {
+            padding: 0 clamp(16px, 5vw, 48px) 48px;
+            flex: 1;
+        }
+
+        .message-bar {
+            margin-bottom: 20px;
+            padding: 14px 18px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(99, 102, 241, 0.08);
+            color: var(--accent);
+            font-size: 14px;
+            display: none;
+        }
+
+        .message-bar.error {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--danger);
+        }
+
+        .articles {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .article-card {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 20px;
+            border: 1px solid var(--border);
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .article-header {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .article-header strong {
+            font-size: 18px;
+        }
+
+        .article-meta {
+            font-size: 13px;
+            color: var(--muted);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .article-preview {
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            background: rgba(15, 23, 42, 0.04);
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .article-preview img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .article-preview span {
+            padding: 24px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: auto;
+        }
+
+        .actions button {
+            flex: 1;
+        }
+
+        .approve-btn {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .approve-btn:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .reject-btn {
+            background: rgba(239, 68, 68, 0.12);
+            color: var(--danger);
+        }
+
+        .reject-btn:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger-hover);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--muted);
+            font-size: 16px;
+            border: 2px dashed var(--border);
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.02);
+        }
+
+        footer {
+            padding: 24px;
+            font-size: 12px;
+            text-align: center;
+            color: var(--muted);
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>投稿审核面板</h1>
+    <div class="queue-status">
+        <span id="queue-info">0 / {{ queue_limit }}</span>
+        <div class="queue-ids" id="queue-ids">队列为空</div>
+    </div>
+    <button class="refresh-btn" id="refresh-btn">手动刷新</button>
+</header>
+<main>
+    <div class="message-bar" id="message-bar"></div>
+    <section class="articles" id="article-list">
+        <div class="empty-state">正在加载投稿...</div>
+    </section>
+</main>
+<footer>
+    Nishikigi &middot; Web 审核界面
+</footer>
+<script>
+    const TOKEN = {{ token | tojson }};
+    const REQUIRES_TOKEN = {{ requires_token | tojson }};
+    const QUEUE_LIMIT = {{ queue_limit }};
+    const QUERY_SUFFIX = TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : "";
+
+    const listEl = document.getElementById('article-list');
+    const queueInfoEl = document.getElementById('queue-info');
+    const queueIdsEl = document.getElementById('queue-ids');
+    const messageBar = document.getElementById('message-bar');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    if (REQUIRES_TOKEN && !TOKEN) {
+        showMessage('缺少访问令牌, 无法加载数据', true);
+    }
+
+    async function fetchArticles() {
+        try {
+            const response = await fetch(`/api/review/articles${QUERY_SUFFIX}`);
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || `加载失败 (${response.status})`);
+            }
+            const data = await response.json();
+            renderArticles(data.items || []);
+            queueInfoEl.textContent = `${data.queue_length || 0} / ${data.queue_limit || QUEUE_LIMIT}`;
+            queueIdsEl.textContent = (data.queue && data.queue.length)
+                ? `队列: ${data.queue.join(', ')}`
+                : '队列为空';
+        } catch (error) {
+            renderArticles([]);
+            showMessage(error.message || '加载失败', true);
+        }
+    }
+
+    function renderArticles(items) {
+        listEl.innerHTML = '';
+        if (!items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.textContent = '当前没有待审核的投稿';
+            listEl.appendChild(empty);
+            return;
+        }
+
+        for (const item of items) {
+            const card = document.createElement('article');
+            card.className = 'article-card';
+            card.innerHTML = `
+                <div class="article-header">
+                    <strong>#${item.id} ${item.anonymous ? '匿名投稿' : (item.sender_name || '未提供昵称')}</strong>
+                    <div class="article-meta">
+                        <span>QQ: ${item.sender_id}</span>
+                        <span>${item.single ? '要求单发' : '普通推送'}</span>
+                        <span>${item.submitted_at}</span>
+                    </div>
+                </div>
+                <div class="article-preview">
+                    ${item.image_url
+                        ? `<img src="${item.image_url}" alt="投稿预览图">`
+                        : '<span>暂无预览图</span>'}
+                </div>
+                <div class="actions">
+                    <button class="approve-btn" data-id="${item.id}">通过</button>
+                    <button class="reject-btn" data-id="${item.id}">驳回</button>
+                </div>
+            `;
+
+            const approveBtn = card.querySelector('.approve-btn');
+            const rejectBtn = card.querySelector('.reject-btn');
+
+            approveBtn.addEventListener('click', () => handleApprove(item.id, card));
+            rejectBtn.addEventListener('click', () => handleReject(item.id, card));
+
+            listEl.appendChild(card);
+        }
+    }
+
+    async function handleApprove(id, card) {
+        setButtonsState(card, true);
+        try {
+            const response = await fetch(`/api/review/articles/${id}/approve${QUERY_SUFFIX}`, {
+                method: 'POST'
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || `审核失败 (${response.status})`);
+            }
+            showMessage(data.message || `投稿 #${id} 已通过`, false);
+            await fetchArticles();
+        } catch (error) {
+            showMessage(error.message || '审核失败', true);
+        } finally {
+            setButtonsState(card, false);
+        }
+    }
+
+    async function handleReject(id, card) {
+        const reason = prompt('请输入驳回理由');
+        if (!reason) {
+            return;
+        }
+        setButtonsState(card, true);
+        try {
+            const response = await fetch(`/api/review/articles/${id}/reject${QUERY_SUFFIX}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ reason })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.detail || `驳回失败 (${response.status})`);
+            }
+            showMessage(data.message || `投稿 #${id} 已驳回`, false);
+            await fetchArticles();
+        } catch (error) {
+            showMessage(error.message || '驳回失败', true);
+        } finally {
+            setButtonsState(card, false);
+        }
+    }
+
+    function setButtonsState(card, disabled) {
+        card.querySelectorAll('button').forEach(btn => {
+            btn.disabled = disabled;
+        });
+    }
+
+    function showMessage(text, isError = false) {
+        if (!text) {
+            messageBar.style.display = 'none';
+            return;
+        }
+        messageBar.textContent = text;
+        messageBar.classList.toggle('error', isError);
+        messageBar.style.display = 'block';
+        clearTimeout(showMessage._timer);
+        showMessage._timer = setTimeout(() => {
+            messageBar.style.display = 'none';
+        }, 5000);
+    }
+
+    refreshBtn.addEventListener('click', () => {
+        fetchArticles();
+    });
+
+    fetchArticles();
+    setInterval(fetchArticles, 60000);
+</script>
+</body>
+</html>

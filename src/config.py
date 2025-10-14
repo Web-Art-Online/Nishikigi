@@ -15,6 +15,9 @@ QUEUE = int(os.getenv("QUEUE", 4))
 HOST = "localhost"
 PORT = 8413
 
+# Web 审核界面访问令牌, 为空则不做校验
+REVIEW_TOKEN = os.getenv("REVIEW_TOKEN", "")
+
 # 自定义状态的表情ID, 详见 https://github.com/NapNeko/NapCatQQ/blob/main/src/core/external/face_config.json
 STATUS_ID = [400, 382, 383, 401, 400, 380, 381, 379, 376, 378, 377, 336]
 
