@@ -55,6 +55,32 @@ lock = asyncio.Lock()
 scheduler = AsyncIOScheduler()
 
 
+async def _generate_and_broadcast_summary(article_id: int) -> None:
+    article = Article.get_or_none(Article.id == article_id)
+    if not article:
+        return
+    if article.summary not in (None, ""):
+        return
+
+    image_path = f"./data/{article_id}/image.png"
+    if not os.path.isfile(image_path):
+        bot.getLogger().warning(
+            f"Summary skipped for #{article_id}: preview image missing at {image_path}"
+        )
+        return
+
+    summary = await agent.summarize_image(image_path)
+
+    if summary:
+        Article.update({Article.summary: summary}).where(Article.id == article_id).execute()
+        await bot.send_group(config.GROUP, f"#{article_id} AI概述: {summary}")
+    else:
+        Article.update({Article.summary: ""}).where(Article.id == article_id).execute()
+        await bot.send_group(
+            config.GROUP, f"#{article_id} AI概述生成失败, 请人工查看投稿图片"
+        )
+
+
 @bot.on_error()
 async def error(context: dict, data: dict):
     exc = context.get("exception")
@@ -353,18 +379,20 @@ async def accept(msg: GroupMessage):
                 await msg.reply(f"投稿 #{id} 不存在或已通过审核")
                 continue
             if article.single:
-                await msg.reply(f"开始推送 #{id}")
-                await publish([id])
-                await msg.reply(f"投稿 #{id} 已经单发")
+                await msg.reply(f"开始推送 #{article.id}")
+                await publish([article.id])
+                await msg.reply(f"投稿 #{article.id} 已经单发")
+                await _generate_and_broadcast_summary(article.id)
                 continue
             else:
                 await bot.send_private(
                     article.sender_id,
                     f"您的投稿 {article} 已通过审核, 正在队列中等待发送",
                 )
+                await _generate_and_broadcast_summary(article.id)
             flag = True
             Article.update({Article.status: Status.QUEUE}).where(
-                Article.id == id
+                Article.id == article.id
             ).execute()
 
         if flag:

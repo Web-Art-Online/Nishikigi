@@ -148,7 +148,7 @@ async def ai_suggest_intent(raw: str) -> dict:
 
 
 async def summarize_image(image_path: str) -> str:
-    """Generate a one-sentence summary for the rendered submission image."""
+    """Generate a concise one-sentence summary describing the submission image."""
 
     headers = {
         "Authorization": f"Bearer {config.AGENT_ROUTER_KEY}",
@@ -162,9 +162,10 @@ async def summarize_image(image_path: str) -> str:
         return ""
 
     prompt = (
-        "你是一名社交媒体内容助理, 需要为校园墙投稿生成一句话概述。"
-        "请在 30 个字以内, 用自然、积极且中立的语气概括图片中的主要内容。"
-        "不要添加表情、话题或引导语, 直接给出概述。"
+        "你是校园墙的审核助理, 需要帮助管理员快速了解投稿图片的内容。"
+        "请认真观察图片, 识别其中的文字、人物、物品、场景和主要事件。"
+        "输出一条不超过 40 个汉字的中文概述, 用一句话覆盖最核心的信息。"
+        "不要添加表情、标签、引导语, 不要臆测图片外的内容, 若有文字尽量提取关键词。"
     )
 
     body = {
@@ -186,13 +187,13 @@ async def summarize_image(image_path: str) -> str:
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "请为这张图片写一句话概述。",
+                        "text": "请分析这张校园墙投稿图片并直接返回一句话概述。",
                     },
                     {
                         "type": "input_image",
                         "image_url": {
                             "url": f"data:image/png;base64,{encoded}",
-                            "detail": "low",
+                            "detail": "high",
                         },
                     },
                 ],
@@ -237,7 +238,12 @@ async def summarize_image(image_path: str) -> str:
     except Exception:
         text = ""
 
-    return text.strip()
+    summary = text.strip()
+    summary = " ".join(summary.split())
+    if len(summary) > 40:
+        summary = summary[:40]
+
+    return summary
 
 
 async def reply_ai_suggestions(msg: PrivateMessage, ai_result: dict):
