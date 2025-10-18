@@ -50,6 +50,7 @@ class Article(Model):
     single = BooleanField()
 
     status = EnumField(Status, default=Status.CREATED)
+    summary = TextField(null=True)
 
     class Meta:
         database = db
@@ -59,6 +60,21 @@ class Article(Model):
 
 
 Article.create_table(safe=True)
+
+
+def _ensure_summary_column():
+    try:
+        db.connect(reuse_if_open=True)
+        columns = {c.name for c in db.get_columns("article")}
+        if "summary" not in columns:
+            db.execute_sql("ALTER TABLE article ADD COLUMN summary TEXT")
+    except Exception as exc:
+        if "duplicate column name" in str(exc).lower():
+            return
+        raise
+
+
+_ensure_summary_column()
 
 
 @dataclass(slots=True)
