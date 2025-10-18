@@ -382,18 +382,19 @@ async def accept(msg: GroupMessage):
                 await msg.reply(f"开始推送 #{article.id}")
                 await publish([article.id])
                 await msg.reply(f"投稿 #{article.id} 已经单发")
-                await _generate_and_broadcast_summary(article.id)
+                asyncio.create_task(_generate_and_broadcast_summary(article.id))
                 continue
             else:
                 await bot.send_private(
                     article.sender_id,
                     f"您的投稿 {article} 已通过审核, 正在队列中等待发送",
                 )
-                await _generate_and_broadcast_summary(article.id)
+                await msg.reply(f"投稿 #{article.id} 已通过, 已加入队列")
             flag = True
             Article.update({Article.status: Status.QUEUE}).where(
                 Article.id == article.id
             ).execute()
+            asyncio.create_task(_generate_and_broadcast_summary(article.id))
 
         if flag:
             articles = (
@@ -636,21 +637,32 @@ async def delete(msg: GroupMessage):
             return
 
         ids = parts[1:]
-        for id in ids:
+        for raw_id in ids:
+            try:
+                article_id = int(raw_id)
+            except ValueError:
+                await msg.reply(f"{raw_id} 不是有效的投稿编号")
+                return
+
             article = Article.get_or_none(
-                (Article.id == id) & (Article.status == Status.CONFRIMED)
+                (Article.id == article_id)
+                & (
+                    Article.status.in_(
+                        [Status.CONFRIMED.value, Status.QUEUE.value]
+                    )
+                )
             )
             if not article:
-                await msg.reply(f"投稿 #{id} 不在队列中")
+                await msg.reply(f"投稿 #{raw_id} 不存在或未在待审核/待推送状态")
                 return
-            Article.delete_by_id(id)
-            if os.path.exists(f"./data/{id}"):
-                shutil.rmtree(f"./data/{id}")
+            Article.delete_by_id(article_id)
+            if os.path.exists(f"./data/{article_id}"):
+                shutil.rmtree(f"./data/{article_id}")
             await bot.send_private(
-                article.sender_id, f"你的投稿 #{id} 已被管理员删除😵‍💫"
+                article.sender_id, f"你的投稿 #{raw_id} 已被管理员删除😵‍💫"
             )
 
-    await msg.reply(f"已删除 {ids}")
+    await msg.reply(f"已删除 {' '.join(ids)}")
     await update_name()
 
 
