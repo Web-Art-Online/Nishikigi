@@ -202,8 +202,12 @@ async def end(msg: PrivateMessage):
         anonymous=ses.anonymous,
     )
 
+    summary = await agent.summarize_image(path)
+    summary_suffix = f"\n\nAI概述: {summary}" if summary else ""
+
     await msg.reply(
         f"[CQ:image,file={get_file_url(path)}]这样投稿可以吗😘\n可以的话请发送:  \n\n#确认\n\n不可以就发送:  \n\n#取消"
+        + summary_suffix
     )
 
 

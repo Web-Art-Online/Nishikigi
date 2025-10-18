@@ -1,3 +1,4 @@
+import base64
 import json
 import httpx
 from botx.models import PrivateMessage
@@ -144,6 +145,99 @@ async def ai_suggest_intent(raw: str) -> dict:
         resp_obj = {"intent_candidates": []}
 
     return resp_obj
+
+
+async def summarize_image(image_path: str) -> str:
+    """Generate a one-sentence summary for the rendered submission image."""
+
+    headers = {
+        "Authorization": f"Bearer {config.AGENT_ROUTER_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        with open(image_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return ""
+
+    prompt = (
+        "你是一名社交媒体内容助理, 需要为校园墙投稿生成一句话概述。"
+        "请在 30 个字以内, 用自然、积极且中立的语气概括图片中的主要内容。"
+        "不要添加表情、话题或引导语, 直接给出概述。"
+    )
+
+    body = {
+        "model": config.AGENT_SUMMARY_MODEL,
+        "max_tokens": 120,
+        "temperature": 0.2,
+        "messages": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt,
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "请为这张图片写一句话概述。",
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{encoded}",
+                            "detail": "low",
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+
+    try:
+        url = config.AGENT_ROUTER_BASE.rstrip("/") + "/v1/chat/completions"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(url, headers=headers, json=body)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        from core import bot
+
+        bot.getLogger().warning(f"AI summary call failed: {e}")
+        return ""
+
+    text = ""
+    try:
+        choices = data.get("choices", []) if isinstance(data, dict) else []
+        if choices:
+            cand = choices[0]
+            if isinstance(cand, dict):
+                message = cand.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict):
+                                if item.get("type") in {"text", "output_text"}:
+                                    text += item.get("text", "")
+                elif "text" in cand:
+                    text = cand.get("text", "")
+            elif isinstance(cand, str):
+                text = cand
+        if not text and isinstance(data, dict):
+            text = data.get("text", "")
+    except Exception:
+        text = ""
+
+    return text.strip()
 
 
 async def reply_ai_suggestions(msg: PrivateMessage, ai_result: dict):
