@@ -55,6 +55,32 @@ lock = asyncio.Lock()
 scheduler = AsyncIOScheduler()
 
 
+async def _generate_and_broadcast_summary(article_id: int) -> None:
+    article = Article.get_or_none(Article.id == article_id)
+    if not article:
+        return
+    if article.summary not in (None, ""):
+        return
+
+    image_path = f"./data/{article_id}/image.png"
+    if not os.path.isfile(image_path):
+        bot.getLogger().warning(
+            f"Summary skipped for #{article_id}: preview image missing at {image_path}"
+        )
+        return
+
+    summary = await agent.summarize_image(image_path)
+
+    if summary:
+        Article.update({Article.summary: summary}).where(Article.id == article_id).execute()
+        await bot.send_group(config.GROUP, f"#{article_id} AI概述: {summary}")
+    else:
+        Article.update({Article.summary: ""}).where(Article.id == article_id).execute()
+        await bot.send_group(
+            config.GROUP, f"#{article_id} AI概述生成失败, 请人工查看投稿图片"
+        )
+
+
 @bot.on_error()
 async def error(context: dict, data: dict):
     exc = context.get("exception")
@@ -349,19 +375,22 @@ async def accept(msg: GroupMessage):
                 await msg.reply(f"投稿 #{id} 不存在或已通过审核")
                 continue
             if article.single:
-                await msg.reply(f"开始推送 #{id}")
-                await publish([id])
-                await msg.reply(f"投稿 #{id} 已经单发")
+                await msg.reply(f"开始推送 #{article.id}")
+                await publish([article.id])
+                await msg.reply(f"投稿 #{article.id} 已经单发")
+                asyncio.create_task(_generate_and_broadcast_summary(article.id))
                 continue
             else:
                 await bot.send_private(
                     article.sender_id,
                     f"您的投稿 {article} 已通过审核, 正在队列中等待发送",
                 )
+                await msg.reply(f"投稿 #{article.id} 已通过, 已加入队列")
             flag = True
             Article.update({Article.status: Status.QUEUE}).where(
-                Article.id == id
+                Article.id == article.id
             ).execute()
+            asyncio.create_task(_generate_and_broadcast_summary(article.id))
 
         if flag:
             articles = (
@@ -604,19 +633,35 @@ async def delete(msg: GroupMessage):
             return
 
         ids = parts[1:]
-        for id in ids:
+        deleted: list[str] = []
+        errors: list[str] = []
+
+        for raw_id in ids:
+            try:
+                article_id = int(raw_id)
+            except ValueError:
+                errors.append(f"{raw_id} 不是有效的投稿编号")
+                continue
+
             article = Article.get_or_none(
-                (Article.id == id) & (Article.status == Status.CONFRIMED)
-            )
-            if not article:
-                await msg.reply(f"投稿 #{id} 不在队列中")
-                return
-            Article.delete_by_id(id)
-            if os.path.exists(f"./data/{id}"):
-                shutil.rmtree(f"./data/{id}")
-            await bot.send_private(
-                article.sender_id, f"你的投稿 #{id} 已被管理员删除😵‍💫"
+                (Article.id == article_id)
+                & (Article.status << [Status.CONFRIMED, Status.QUEUE])
             )
 
-    await msg.reply(f"已删除 {ids}")
+            if not article:
+                errors.append(f"投稿 #{raw_id} 不存在或未在待审核/待推送状态")
+                continue
+
+            Article.delete_by_id(article_id)
+            if os.path.exists(f"./data/{article_id}"):
+                shutil.rmtree(f"./data/{article_id}")
+            await bot.send_private(
+                article.sender_id, f"你的投稿 #{raw_id} 已被管理员删除😵‍💫"
+            )
+            deleted.append(raw_id)
+
+    if deleted:
+        await msg.reply(f"已删除 {' '.join(deleted)}")
+    if errors:
+        await msg.reply("\n".join(errors))
     await update_name()
