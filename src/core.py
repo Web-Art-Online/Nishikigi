@@ -19,7 +19,7 @@ from uvicorn import Config, Server
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from botx import Bot
-from botx.models import PrivateMessage, GroupMessage, User, PrivateRecall, FriendAdd
+from botx.models import PrivateMessage, GroupMessage, User, PrivateRecall, FriendRequest
 import httpx
 
 bot = Bot(
@@ -228,8 +228,12 @@ async def end(msg: PrivateMessage):
         anonymous=ses.anonymous,
     )
 
+    summary = await agent.summarize_image(path)
+    summary_suffix = f"\n\nAI概述: {summary}" if summary else ""
+
     await msg.reply(
         f"[CQ:image,file={get_file_url(path)}]这样投稿可以吗😘\n可以的话请发送:  \n\n#确认\n\n不可以就发送:  \n\n#取消"
+        + summary_suffix
     )
 
 
@@ -262,7 +266,7 @@ async def done(msg: PrivateMessage):
         "set_diy_online_status",
         {
             "face_id": random.choice(config.STATUS_ID),
-            "wording": f"已发 {len(Article.select().where(Article.status == Status.PUBLISHED))} 单",
+            "wording": f"已接 {len(Article.select())} 单",
         },
     )
 
@@ -648,3 +652,8 @@ async def delete(msg: GroupMessage):
 
     await msg.reply(f"已删除 {ids}")
     await update_name()
+
+
+@bot.on_request()
+async def friend_request(r: FriendRequest):
+    await r.result(True)

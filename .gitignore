@@ -5,6 +5,5 @@ data
 upload.sh
 .rsync-exclude
 .vscode
-tests
-
+tests/
 .env
