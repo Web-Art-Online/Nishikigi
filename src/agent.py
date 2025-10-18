@@ -175,22 +175,17 @@ async def summarize_image(image_path: str) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt,
-                    }
-                ],
+                "content": prompt,
             },
             {
                 "role": "user",
                 "content": [
                     {
-                        "type": "input_text",
+                        "type": "text",
                         "text": "请分析这张校园墙投稿图片并直接返回一句话概述。",
                     },
                     {
-                        "type": "input_image",
+                        "type": "image_url",
                         "image_url": {
                             "url": f"data:image/png;base64,{encoded}",
                             "detail": "high",
