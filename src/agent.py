@@ -1,3 +1,4 @@
+import base64
 import json
 import httpx
 from botx.models import PrivateMessage
@@ -144,6 +145,100 @@ async def ai_suggest_intent(raw: str) -> dict:
         resp_obj = {"intent_candidates": []}
 
     return resp_obj
+
+
+async def summarize_image(image_path: str) -> str:
+    """Generate a concise one-sentence summary describing the submission image."""
+
+    headers = {
+        "Authorization": f"Bearer {config.AGENT_ROUTER_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        with open(image_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return ""
+
+    prompt = (
+        "你是校园墙的审核助理, 需要帮助管理员几秒内了解投稿图片的主旨。"
+        "请先识别图片中最重要的人物、事件、物品和文字, 理解他们表达的意思。"
+        "用一句不超过40个汉字的中文总结投稿的重点、目的或行动, 让读者无需打开图片也能了解核心信息。"
+        "严禁逐字抄写或分段列出文字, 只保留最关键的事实或结论, 不要添加前缀、表情或推测图片外的信息。"
+    )
+
+    body = {
+        "model": config.AGENT_SUMMARY_MODEL,
+        "max_tokens": 120,
+        "temperature": 0.2,
+        "messages": [
+            {
+                "role": "system",
+                "content": prompt,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "请分析这张校园墙投稿图片并直接返回一句话概述。",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{encoded}",
+                            "detail": "high",
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+
+    try:
+        url = config.AGENT_ROUTER_BASE.rstrip("/") + "/v1/chat/completions"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(url, headers=headers, json=body)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        from core import bot
+
+        bot.getLogger().warning(f"AI summary call failed: {e}")
+        return ""
+
+    text = ""
+    try:
+        choices = data.get("choices", []) if isinstance(data, dict) else []
+        if choices:
+            cand = choices[0]
+            if isinstance(cand, dict):
+                message = cand.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict):
+                                if item.get("type") in {"text", "output_text"}:
+                                    text += item.get("text", "")
+                elif "text" in cand:
+                    text = cand.get("text", "")
+            elif isinstance(cand, str):
+                text = cand
+        if not text and isinstance(data, dict):
+            text = data.get("text", "")
+    except Exception:
+        text = ""
+
+    summary = text.strip()
+    summary = " ".join(summary.split())
+    if len(summary) > 40:
+        summary = summary[:40]
+
+    return summary
 
 
 async def reply_ai_suggestions(msg: PrivateMessage, ai_result: dict):
