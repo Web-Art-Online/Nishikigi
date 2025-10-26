@@ -14,7 +14,7 @@ ALBUM = os.getenv("ALBUM", "ALBUM")
 
 # 用于获取图片等的 FastAPI 服务
 HOST = "localhost"
-PORT = 8413
+PORT = 7891
 
 # 自定义状态的表情ID, 详见 https://github.com/NapNeko/NapCatQQ/blob/main/src/core/external/face_config.json
 STATUS_ID = [400, 382, 383, 401, 400, 380, 381, 379, 376, 378, 377, 336]

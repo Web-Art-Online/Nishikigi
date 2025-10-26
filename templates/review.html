@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>稿件审核面板</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+            margin: 0;
+            background: #f5f5f7;
+            color: #1f2933;
+        }
+        header {
+            background: linear-gradient(120deg, #4f46e5, #9333ea);
+            color: white;
+            padding: 32px;
+            box-shadow: 0 8px 24px rgba(79, 70, 229, 0.25);
+        }
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+        .container {
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .controls {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        .controls label {
+            font-weight: 600;
+        }
+        .controls input {
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            font-size: 14px;
+        }
+        .tabs button {
+            border: none;
+            background: white;
+            color: #4f46e5;
+            border-radius: 9999px;
+            padding: 10px 18px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 6px 16px rgba(79, 70, 229, 0.18);
+            margin-right: 8px;
+        }
+        .tabs button.active {
+            background: linear-gradient(120deg, #4f46e5, #9333ea);
+            color: white;
+        }
+        .actions button {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .actions button + button {
+            margin-left: 8px;
+        }
+        .actions .approve {
+            background: #22c55e;
+            color: white;
+        }
+        .actions .reject {
+            background: #ef4444;
+            color: white;
+        }
+        .actions .publish {
+            background: #f97316;
+            color: white;
+        }
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+            margin-bottom: 24px;
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 24px;
+        }
+        .card.single-column {
+            grid-template-columns: 1fr;
+        }
+        .meta {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .meta span {
+            font-size: 15px;
+        }
+        .meta strong {
+            font-size: 15px;
+            margin-right: 8px;
+        }
+        .preview img {
+            max-width: 100%;
+            border-radius: 16px;
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+        }
+        .empty {
+            text-align: center;
+            padding: 80px 20px;
+            color: #6b7280;
+            background: white;
+            border-radius: 20px;
+            box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.08);
+        }
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        .stats {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .stats .item {
+            background: white;
+            padding: 14px 16px;
+            border-radius: 14px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+            font-weight: 600;
+            color: #4f46e5;
+        }
+        @media (max-width: 960px) {
+            .card {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>稿件审核面板</h1>
+    <p style="margin-top: 8px; opacity: 0.85;">快速浏览投稿、完成审核及推送操作</p>
+</header>
+<div class="container">
+    <div id="error" class="error" style="display:none"></div>
+    <div class="controls">
+        <label>操作人 QQ: <input id="operator" type="text" placeholder="请输入审核人 QQ" /></label>
+        <div class="tabs">
+            <button data-status="confirmed" class="active">待审核</button>
+            <button data-status="queue">待推送</button>
+            <button data-status="rejected">已驳回</button>
+            <button data-status="published">已推送</button>
+        </div>
+        <button id="refresh" class="actions approve" style="background:#2563eb">刷新</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div id="articles"></div>
+</div>
+<script>
+const state = {
+    status: 'confirmed',
+    operator: '',
+    stats: {},
+    items: []
+};
+
+const statusLabels = {
+    confirmed: '待审核',
+    queue: '待推送',
+    rejected: '已驳回',
+    published: '已推送'
+};
+
+const tabs = document.querySelectorAll('.tabs button');
+const operatorInput = document.getElementById('operator');
+const articlesContainer = document.getElementById('articles');
+const statsContainer = document.getElementById('stats');
+const errorBox = document.getElementById('error');
+
+function setError(message) {
+    if (!message) {
+        errorBox.style.display = 'none';
+        return;
+    }
+    errorBox.textContent = message;
+    errorBox.style.display = 'block';
+}
+
+async function fetchJSON(url, options) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
+    }
+    return response.json();
+}
+
+async function loadStats() {
+    try {
+        const data = await fetchJSON('/api/stats');
+        state.stats = data.stats || {};
+        renderStats();
+    } catch (err) {
+        console.error(err);
+        setError('无法加载统计信息: ' + err.message);
+    }
+}
+
+async function loadArticles() {
+    try {
+        setError('');
+        const data = await fetchJSON(`/api/articles?status=${encodeURIComponent(state.status)}`);
+        state.items = data.items || [];
+        renderArticles();
+    } catch (err) {
+        console.error(err);
+        setError('无法加载投稿列表: ' + err.message);
+    }
+}
+
+function renderStats() {
+    statsContainer.innerHTML = '';
+    const entries = Object.entries(state.stats);
+    if (!entries.length) {
+        return;
+    }
+    entries.forEach(([status, count]) => {
+        const item = document.createElement('div');
+        item.className = 'item';
+        item.textContent = `${statusLabels[status] || status}: ${count}`;
+        statsContainer.appendChild(item);
+    });
+}
+
+function renderArticles() {
+    articlesContainer.innerHTML = '';
+    if (!state.items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = '此状态下暂无投稿';
+        articlesContainer.appendChild(empty);
+        return;
+    }
+
+    state.items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        if (!item.image_url) {
+            card.classList.add('single-column');
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.innerHTML = `
+            <div><strong>#${item.id}</strong> ${item.status_label}</div>
+            <div><strong>投稿人:</strong> ${item.sender_name} (${item.sender_id})</div>
+            <div><strong>匿名:</strong> ${item.anonymous ? '是' : '否'}</div>
+            <div><strong>要求单发:</strong> ${item.single ? '是' : '否'}</div>
+            <div><strong>提交时间:</strong> ${new Date(item.created_at).toLocaleString()}</div>
+            <div><strong>审核人:</strong> ${item.approvers && item.approvers.length ? item.approvers.join(', ') : '暂无'}</div>
+        `;
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        if (state.status === 'confirmed') {
+            const approveBtn = document.createElement('button');
+            approveBtn.className = 'approve';
+            approveBtn.textContent = '通过';
+            approveBtn.onclick = () => approveArticle(item.id);
+            actions.appendChild(approveBtn);
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'reject';
+            rejectBtn.textContent = '驳回';
+            rejectBtn.onclick = () => rejectArticle(item.id);
+            actions.appendChild(rejectBtn);
+        }
+        if (state.status === 'queue' || (item.single && state.status === 'confirmed')) {
+            const publishBtn = document.createElement('button');
+            publishBtn.className = 'publish';
+            publishBtn.textContent = '立即推送';
+            publishBtn.onclick = () => publishArticles([item.id]);
+            actions.appendChild(publishBtn);
+        }
+        meta.appendChild(actions);
+
+        card.appendChild(meta);
+
+        if (item.image_url) {
+            const preview = document.createElement('div');
+            preview.className = 'preview';
+            const img = document.createElement('img');
+            img.src = item.image_url;
+            img.alt = `投稿 #${item.id}`;
+            preview.appendChild(img);
+            card.appendChild(preview);
+        }
+
+        articlesContainer.appendChild(card);
+    });
+}
+
+function ensureOperator() {
+    const value = operatorInput.value.trim();
+    if (!value) {
+        setError('请先填写操作人 QQ');
+        return null;
+    }
+    if (!/^[0-9]{5,}$/.test(value)) {
+        setError('操作人 QQ 格式不正确');
+        return null;
+    }
+    setError('');
+    return parseInt(value, 10);
+}
+
+async function approveArticle(id) {
+    const operator = ensureOperator();
+    if (!operator && operator !== 0) return;
+    try {
+        await fetchJSON(`/api/articles/${id}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ operator })
+        });
+        await Promise.all([loadStats(), loadArticles()]);
+    } catch (err) {
+        console.error(err);
+        setError('无法通过投稿 #' + id + ' : ' + err.message);
+    }
+}
+
+async function rejectArticle(id) {
+    const operator = ensureOperator();
+    if (!operator && operator !== 0) return;
+    const reason = prompt('请输入驳回理由');
+    if (!reason) {
+        return;
+    }
+    try {
+        await fetchJSON(`/api/articles/${id}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ operator, reason })
+        });
+        await Promise.all([loadStats(), loadArticles()]);
+    } catch (err) {
+        console.error(err);
+        setError('无法驳回投稿 #' + id + ' : ' + err.message);
+    }
+}
+
+async function publishArticles(ids) {
+    const operator = ensureOperator();
+    if (!operator && operator !== 0) return;
+    if (!Array.isArray(ids) || !ids.length) return;
+    if (!confirm('确认推送选中的投稿吗?')) return;
+    try {
+        await fetchJSON('/api/articles/publish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+        });
+        await Promise.all([loadStats(), loadArticles()]);
+    } catch (err) {
+        console.error(err);
+        setError('推送失败: ' + err.message);
+    }
+}
+
+tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        tabs.forEach(btn => btn.classList.remove('active'));
+        tab.classList.add('active');
+        state.status = tab.dataset.status;
+        loadArticles();
+    });
+});
+
+document.getElementById('refresh').addEventListener('click', () => {
+    loadStats();
+    loadArticles();
+});
+
+operatorInput.addEventListener('input', () => {
+    state.operator = operatorInput.value.trim();
+});
+
+loadStats();
+loadArticles();
+</script>
+</body>
+</html>

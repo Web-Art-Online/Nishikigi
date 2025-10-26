@@ -5,16 +5,17 @@ import time
 from typing import Sequence
 
 
+import agent
 import config
-from models import Article, Session, Status
 import image
 import random
 import traceback
 import utils
-import agent
-
-from fastapi import FastAPI, HTTPException
+from models import Article, Session, Status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from uvicorn import Config, Server
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -29,20 +30,58 @@ from botx.models import (
 )
 import httpx
 
+from review_service import ReviewCoordinator
+
 bot = Bot(
     ws_uri=config.WS_URL, token=config.ACCESS_TOKEN, log_level="DEBUG", msg_cd=0.5
 )
 
 token = hex(random.randint(0, 2 << 128))[2:]
 
-app = FastAPI()
+app = FastAPI(title="Nishikigi Review Console")
+templates = Jinja2Templates(directory="templates")
+
+review = ReviewCoordinator(bot)
 
 # workers 必须为 1. 因为没有多进程数据同步.
-server = Server(Config(app=app, host="localhost", port=config.PORT, workers=1))
+server = Server(Config(app=app, host=config.HOST, port=config.PORT, workers=1))
 
 
 def get_file_url(path: str):
     return f"http://{config.HOST}:{config.PORT}/image?p={path}&t={token}"
+
+
+status_text = {
+    Status.CREATED: "投稿中",
+    Status.CONFRIMED: "待审核",
+    Status.REJECTED: "已驳回",
+    Status.QUEUE: "待推送",
+    Status.PUBLISHED: "已推送",
+}
+
+
+class ApproveRequest(BaseModel):
+    operator: int
+
+
+class RejectRequest(BaseModel):
+    operator: int
+    reason: str
+
+
+class PublishRequest(BaseModel):
+    ids: list[int]
+
+
+def build_article_response(article: Article) -> dict:
+    payload = review.article_payload(article)
+    image_url = get_file_url(payload.image_path) if payload.image_path else None
+    data = review.serialize(payload, image_url=image_url)
+    data["status_label"] = status_text.get(payload.status, "未知状态")
+    data["approvers"] = (
+        [op for op in (payload.approve or "").split(",") if op]
+    )
+    return data
 
 
 @app.get("/image")
@@ -52,12 +91,86 @@ def get_image(p: str, t: str):
     return FileResponse(path=p)
 
 
+def parse_status_filter(raw: str | None) -> Sequence[Status] | None:
+    if not raw:
+        return None
+    result: list[Status] = []
+    for item in raw.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            result.append(Status(value))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"未知状态: {value}")
+    return result
+
+
+@app.get("/")
+async def review_page(request: Request):
+    return templates.TemplateResponse("review.html", {"request": request})
+
+
+@app.get("/api/articles")
+async def api_list_articles(status: str | None = None):
+    statuses = parse_status_filter(status)
+    items = [build_article_response(article) for article in review.list_articles(statuses)]
+    return {"items": items}
+
+
+@app.get("/api/articles/{article_id}")
+async def api_get_article(article_id: int):
+    article = review.get_article(article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="稿件不存在")
+    return build_article_response(article)
+
+
+@app.post("/api/articles/{article_id}/approve")
+async def api_approve_article(article_id: int, payload: ApproveRequest):
+    article = review.get_article(article_id)
+    if not article or article.status != Status.CONFRIMED:
+        raise HTTPException(status_code=404, detail="稿件不存在或状态不正确")
+    async with review.lock:
+        await review.approve_articles([article_id], operator=payload.operator)
+    return {"ok": True}
+
+
+@app.post("/api/articles/{article_id}/reject")
+async def api_reject_article(article_id: int, payload: RejectRequest):
+    async with review.lock:
+        success = await review.reject_article(article_id, payload.operator, payload.reason)
+    if not success:
+        raise HTTPException(status_code=404, detail="稿件不存在或状态不正确")
+    return {"ok": True}
+
+
+@app.post("/api/articles/publish")
+async def api_publish_articles(payload: PublishRequest):
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="请提供稿件 ID")
+    for article_id in payload.ids:
+        article = review.get_article(article_id)
+        if not article or article.status not in (Status.QUEUE, Status.CONFRIMED):
+            raise HTTPException(
+                status_code=404, detail=f"稿件 {article_id} 不存在或不在待推送状态"
+            )
+    async with review.lock:
+        tids = await review.publish_articles(payload.ids)
+    return {"ok": True, "tids": tids}
+
+
+@app.get("/api/stats")
+async def api_stats():
+    data = {}
+    for status in Status:
+        data[status.value] = Article.select().where(Article.status == status).count()
+    return {"stats": data, "token": token}
+
+
 sessions: dict[User, Session] = {}
 
 start_time = time.time()
-
-# 管理的一些操作要上锁
-lock = asyncio.Lock()
 
 scheduler = AsyncIOScheduler()
 
@@ -249,7 +362,7 @@ async def done(msg: PrivateMessage):
         },
     )
 
-    await update_name()
+    await review.refresh_group_card()
 
 
 @bot.on_cmd("取消", help_msg="用于取消当前投稿")
@@ -342,14 +455,14 @@ async def recall(r: PrivateRecall):
     targets=[config.GROUP],
 )
 async def approve(msg: GroupMessage):
-    async with lock:
+    async with review.lock:
         parts = msg.raw_message.split(" ")
         if len(parts) < 2:
             await msg.reply("请带上要通过的投稿编号")
             return
         ids = parts[1:]
 
-        await approve_article(ids, operator=msg.sender.user_id)
+        await review.approve_articles(ids, operator=msg.sender.user_id)
 
 
 @bot.on_cmd(
@@ -358,7 +471,7 @@ async def approve(msg: GroupMessage):
     targets=[config.GROUP],
 )
 async def refuse(msg: GroupMessage):
-    async with lock:
+    async with review.lock:
         parts = msg.raw_message.split(" ")
         if len(parts) < 3:
             await msg.reply("请带上要驳回的投稿和理由")
@@ -366,23 +479,19 @@ async def refuse(msg: GroupMessage):
 
         id = parts[1]
         reason = parts[2:]
-        article = Article.get_or_none(
-            (Article.id == id) & (Article.status == Status.CONFRIMED)
-        )
-        if article == None:
-            await msg.reply(f"投稿 #{id} 不存在或已通过审核")
+        try:
+            article_id = int(id)
+        except ValueError:
+            await msg.reply(f"投稿编号 {id} 不是有效数字")
             return
 
-        Article.update(
-            {"status": Status.REJECTED, "approve": msg.sender.user_id}
-        ).where(Article.id == id).execute()
-        await bot.send_private(
-            article.sender_id,
-            f"抱歉, 你的投稿 #{id} 已被管理员驳回😵‍💫 理由: {' '.join(reason)}",
+        success = await review.reject_article(
+            article_id, msg.sender.user_id, " ".join(reason)
         )
+        if not success:
+            await msg.reply(f"投稿 #{id} 不存在或已通过审核")
+            return
         await msg.reply(f"已驳回投稿 #{id}")
-
-        await update_name()
 
 
 @bot.on_cmd(
@@ -391,7 +500,7 @@ async def refuse(msg: GroupMessage):
     targets=[config.GROUP],
 )
 async def push(msg: GroupMessage):
-    async with lock:
+    async with review.lock:
         parts = msg.raw_message.split(" ")
         if len(parts) < 2:
             await msg.reply("请带上要通过的投稿id")
@@ -406,9 +515,8 @@ async def push(msg: GroupMessage):
                 await msg.reply(f"投稿 #{id} 不存在或已被推送或未通过审核")
                 return
         await msg.reply(f"开始推送 {ids}")
-        tid = await publish(ids)
+        tid = await review.publish_articles(ids)
         await msg.reply(f"已推送 {ids}\ntid: {tid}")
-        await update_name()
 
 
 @bot.on_cmd(
@@ -508,42 +616,14 @@ async def emoji_approve(notice: EmojiLike):
         if emoji.emoji_id == 201:
             a = Article.select().where(Article.tid == notice.message_id)
             if a:
-                await approve_article([a[0].id], operator=notice.user_id, is_emoji=True)
-
-
-async def publish(ids: Sequence[int | str]) -> list[str]:
-    qzone = await bot.get_qzone()
-    names = await qzone.upload_raw_image(
-        album_name=config.ALBUM,
-        file_path=list(map(lambda id: f"./data/{id}/image.png", ids)),
-    )
-
-    for i, id in enumerate(ids):
-        Article.update({"tid": names[i], "status": Status.PUBLISHED}).where(
-            Article.id == id
-        ).execute()
-        await bot.send_private(
-            Article.get_by_id(id).sender_id, f"您的投稿 #{id} 已被推送😋"
-        )
-    return names
-
-
-async def update_name():
-    confirmed = Article.select().where(Article.status == Status.CONFRIMED)
-    queue = Article.select().where(Article.status == Status.QUEUE)
-    await bot.call_api(
-        "set_group_card",
-        {
-            "group_id": config.GROUP,
-            "user_id": bot.me.user_id,
-            "card": f"待审核: {utils.to_list(confirmed)}\n待推送: {utils.to_list(queue)}",
-        },
-    )
+                await review.approve_articles(
+                    [a[0].id], operator=notice.user_id, is_emoji=True
+                )
 
 
 @scheduler.scheduled_job(IntervalTrigger(hours=1))
 async def clear():
-    async with lock:
+    async with review.lock:
         to_remove = []
         for sess in list(sessions.keys()):
             try:
@@ -569,47 +649,38 @@ async def clear():
         for sess in to_remove:
             sessions.pop(sess, None)
 
+        if to_remove:
+            await review.refresh_group_card()
+
 
 @bot.on_cmd(
     "删除", help_msg="删除一条投稿, 可以删除多条, 如 #删除 1 2", targets=[config.GROUP]
 )
 async def delete(msg: GroupMessage):
-    async with lock:
+    async with review.lock:
         parts = msg.raw_message.split(" ")
         if len(parts) < 2:
             await msg.reply("请带上要删除的投稿id")
             return
 
-        ids = parts[1:]
-        for id in ids:
-            article = Article.get_or_none(
-                (Article.id == id) & (Article.status != Status.CREATED)
-            )
-            if not article:
-                await msg.reply(f"投稿 #{id} 不在队列中")
+        raw_ids = parts[1:]
+        article_ids: list[int] = []
+        for raw in raw_ids:
+            try:
+                article_ids.append(int(raw))
+            except ValueError:
+                await msg.reply(f"投稿编号 {raw} 不是有效数字")
                 return
-            Article.delete_by_id(id)
-            if os.path.exists(f"./data/{id}"):
-                shutil.rmtree(f"./data/{id}")
 
-            if article.status == Status.PUBLISHED:
-                qzone = await bot.get_qzone()
-                album = await qzone.get_album(config.ALBUM)
-                if album == None:
-                    bot.getLogger().error(f"无法找到相册 {config.ALBUM}")
-                    continue
-                image = await qzone.get_image(album_id=album, name=article.tid)
-                if image == None:
-                    await msg.reply(f"无法找到投稿 #{id} 对应的空间动态图片")
-                    continue
-                await qzone.delete_image(image)
+        removed = await review.delete_articles(article_ids)
+        missing = [str(article_id) for article_id in article_ids if article_id not in removed]
 
-            await bot.send_private(
-                article.sender_id, f"你的投稿 #{id} 已被管理员删除😵‍💫"
-            )
-
-    await msg.reply(f"已删除 {ids}")
-    await update_name()
+    if removed:
+        await msg.reply(f"已删除 {list(map(str, removed))}")
+    if missing:
+        await msg.reply(
+            "以下投稿无法删除, 可能不存在或仍在投稿中: " + ", ".join(missing)
+        )
 
 
 @bot.on_request()
@@ -617,70 +688,3 @@ async def friend_request(r: FriendRequest):
     await r.result(True)
 
 
-async def approve_article(ids: list, operator: int, is_emoji: bool = False):
-    flag = False  # 只有有投稿加入队列时才判断是否推送
-    for id in ids:
-        article = Article.get_or_none(
-            (Article.id == id) & (Article.status == Status.CONFRIMED)
-        )
-        if not article:
-            if not is_emoji:
-                await bot.send_group(
-                    group=config.GROUP, msg=f"投稿 #{id} 不存在或已通过审核"
-                )
-            continue
-
-        operators = article.approve.split(",") if article.approve else []
-        if str(operator) in operators:
-            continue
-        operators.append(str(operator))
-
-        Article.update({"approve": ",".join(operators)}).where(
-            Article.id == id
-        ).execute()
-
-        if len(operators) <= 1:
-            continue
-
-        await bot.send_group(config.GROUP, f"投稿 #{id} 进入待发送队列")
-
-        if article.single:
-            await bot.send_group(group=config.GROUP, msg=f"开始推送 #{id}")
-            await publish([id])
-            await bot.send_group(group=config.GROUP, msg=f"投稿 #{id} 已经单发")
-            continue
-        else:
-            await bot.send_private(
-                article.sender_id,
-                f"您的投稿 {article} 已通过审核, 正在队列中等待发送",
-            )
-        flag = True
-        Article.update(
-            {
-                "status": Status.QUEUE,
-            }
-        ).where(Article.id == id).execute()
-
-    if flag:
-        articles = (
-            Article.select()
-            .where(Article.status == Status.QUEUE)
-            .order_by(Article.id.asc())
-            .limit(config.QUEUE)
-        )
-        if len(articles) < config.QUEUE:
-            await bot.send_group(
-                group=config.GROUP, msg=f"当前队列中有{len(articles)}个稿件, 暂不推送"
-            )
-        else:
-            await bot.send_group(
-                group=config.GROUP,
-                msg=f"队列已积压{len(articles)}个稿件, 将推送前{config.QUEUE}个稿件...",
-            )
-            tid = await publish(list(map(lambda a: a.id, articles)))
-            await bot.send_group(
-                group=config.GROUP,
-                msg=f"已推送{list(map(lambda a: a.id, articles))}\ntid: {tid}",
-            )
-
-    await update_name()
