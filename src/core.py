@@ -511,7 +511,9 @@ async def emoji_approve(notice: EmojiLike):
                 await approve_article([a[0].id], operator=notice.user_id, is_emoji=True)
 
 
-async def publish(ids: Sequence[int | str]) -> list[str]:
+async def publish(ids: list[str]) -> list[str]:
+    ids.reverse()
+
     qzone = await bot.get_qzone()
     names = await qzone.upload_raw_image(
         album_name=config.ALBUM,
@@ -642,7 +644,9 @@ async def approve_article(ids: list, operator: int, is_emoji: bool = False):
         if len(operators) <= 1:
             continue
 
-        await bot.send_group(config.GROUP, f"投稿 #{id} 进入待发送队列")
+        await bot.send_group(
+            config.GROUP, f"投稿 #{id} 进入待发送队列\n审核人: {', '.join(operators)}"
+        )
 
         if article.single:
             await bot.send_group(group=config.GROUP, msg=f"开始推送 #{id}")
