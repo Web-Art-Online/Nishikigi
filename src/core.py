@@ -504,11 +504,16 @@ async def reply(msg: GroupMessage):
 
 @bot.on_notice()
 async def emoji_approve(notice: EmojiLike):
-    for emoji in notice.likes:
-        if emoji.emoji_id == 201:
-            a = Article.select().where(Article.tid == notice.message_id)
-            if a:
-                await approve_article([a[0].id], operator=notice.user_id, is_emoji=True)
+    if notice.user_id == bot.me.user_id:
+        return
+    async with lock:
+        for emoji in notice.likes:
+            if emoji.emoji_id == 201:
+                a = Article.select().where(Article.tid == notice.message_id)
+                if a:
+                    await approve_article(
+                        [a[0].id], operator=notice.user_id, is_emoji=True
+                    )
 
 
 async def publish(ids: list[str]) -> list[str]:
