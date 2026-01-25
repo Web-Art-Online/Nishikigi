@@ -575,7 +575,7 @@ async def clear():
             sessions.pop(sess, None)
 
 
-@scheduler.scheduled_job(IntervalTrigger(days=config.HEARTBEAT_INTERVAL))
+@scheduler.scheduled_job(IntervalTrigger(hours=config.HEARTBEAT_INTERVAL))
 async def heartbeat():
     await bot.send_group(config.GROUP, "🤖 Nishikigi Heartbeat")
 
