@@ -577,6 +577,11 @@ async def clear():
             sessions.pop(sess, None)
 
 
+@scheduler.scheduled_job(IntervalTrigger(days=1))
+async def heartbeat():
+    await bot.send_group(config.GROUP, "🤖 Nishikigi Heartbeat")
+
+
 @bot.on_cmd(
     "删除", help_msg="删除一条投稿, 可以删除多条, 如 #删除 1 2", targets=[config.GROUP]
 )
