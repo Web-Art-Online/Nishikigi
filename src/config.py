@@ -11,6 +11,7 @@ ACCESS_TOKEN = os.getenv("ACCESS_TOKEN", "")
 NAME = os.getenv("NAME", "TestBot")
 QUEUE = int(os.getenv("QUEUE", 4))
 ALBUM = os.getenv("ALBUM", "ALBUM")
+HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", 12))
 
 # 用于获取图片等的 FastAPI 服务
 HOST = "localhost"

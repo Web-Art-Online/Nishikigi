@@ -239,7 +239,7 @@ async def done(msg: PrivateMessage):
     Article.update({"status": Status.CONFRIMED, "tid": msg_id}).where(
         Article.id == session.id,
     ).execute()
-    await msg.reply("已成功投稿, 请耐心等待管理员审核😘")
+    await msg.reply(f"已成功投稿, 请耐心等待管理员审核😘\n稿件编号:{session.id}")
 
     await bot.call_api(
         "set_diy_online_status",
@@ -248,7 +248,6 @@ async def done(msg: PrivateMessage):
             "wording": f"已接 {len(Article.select())} 单",
         },
     )
-
     await update_name()
 
 
@@ -263,7 +262,6 @@ async def cancel(msg: PrivateMessage):
     sessions.pop(msg.sender)
     shutil.rmtree(f"./data/{id}")
     await msg.reply("已取消本次投稿🫢")
-
     await bot.send_group(config.GROUP, f"{msg.sender} 取消了投稿")
 
 
@@ -577,7 +575,7 @@ async def clear():
             sessions.pop(sess, None)
 
 
-@scheduler.scheduled_job(IntervalTrigger(days=1))
+@scheduler.scheduled_job(IntervalTrigger(days=config.HEARTBEAT_INTERVAL))
 async def heartbeat():
     await bot.send_group(config.GROUP, "🤖 Nishikigi Heartbeat")
 
