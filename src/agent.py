@@ -21,6 +21,7 @@ def is_known_command(raw: str) -> bool:
         "#取消",
         "#帮助",
         "#反馈",
+        "#背景",
         "＃投稿",
         "＃投稿 匿名",
         "＃投稿 单发",
@@ -30,10 +31,11 @@ def is_known_command(raw: str) -> bool:
         "＃取消",
         "＃帮助",
         "＃反馈",
+        "＃背景",
     }
     # TODO 不要写死
 
-    return s in valid_cmds
+    return any(s.startswith(cmd) for cmd in valid_cmds)
 
 
 async def ai_suggest_intent(raw: str) -> dict:

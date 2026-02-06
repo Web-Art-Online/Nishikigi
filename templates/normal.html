@@ -6,31 +6,50 @@
         body {
             font-family: "SF Pro", "PingFang SC", "Apple Color Emoji", Arial, sans-serif;
             align-items: center;
+            position: relative;
             width: 720px;
             min-height: 720px;
             background-color: #f0f0f0;
             display: flex;
             justify-content: center;
             letter-spacing: 0.5px;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .bg::before {
+            transform: scale(1.1);
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: -2;
+            {% if not bg_img %}
             background: radial-gradient(at 70% 70%, rgba(255, 0, 150, 0.1), transparent 60%),
                         radial-gradient(at 30% 30%, rgba(0, 200, 255, 0.15), transparent 60%),
                         radial-gradient(at 50% 50%, rgba(255, 255, 0, 0.15), transparent 60%);
+            {% endif %}
+            {% if bg_img %}
+            background-image: url("file://{{ bg_img }}");
+            background-size: cover;
+            background-position: center;
+            {% endif %}
+            filter: blur(4px);
         }
         .card {
             flex-direction: column;
             display: flex;
-            margin: 40px;
             padding: 30px;
-            width: 100%;
-            min-height: 480px;
+            margin: 40px;
+            width: 680px;
+            min-height: 580px;
             justify-content: space-between; 
             z-index: 1;
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.3);
             border-radius: 24px;
             box-shadow: 4px 8px 32px rgba(0, 0, 0, 0.2);
             backdrop-filter: blur(15px);
             -webkit-backdrop-filter: blur(15px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-sizing: border-box
         }
         .user {
             display: flex;
@@ -81,6 +100,7 @@
             display: inline !important;
             padding: 0 !important;
             transform: translateY(-0.1em);
+            box-shadow: none !important;
         }
         .rainbow {
             background: linear-gradient(90deg, #fbc2eb, #a6c1ee);
@@ -90,15 +110,11 @@
             text-shadow: 0 2px 20px rgba(0, 114, 255, 0.15);
         }
 
-        .blur-bg {
-            width: 100%;
-            position: absolute;
-            z-index: -1;
-        }
     </style>
 </head>
 
 <body>
+<div class="bg">
 <div class="card">
     <div>
         <div class="user">
@@ -119,7 +135,7 @@
                 <div class="{% if admin %}rainbow{% endif %}" style="font-size: 46px; font-weight: bold;">
                 {{ username }}
                 </div>
-                <div style="font-size: 24px; color: gray;">
+                <div style="font-size: 24px; color: rgb(200, 200, 200);">
                 {{ user_id }}
                 </div>
             </div>
@@ -154,6 +170,7 @@
             <div>由 筑梦云间·网站社 开发</div>
         </div>
     </div>
+</div>
 </div>
 </body>
 </html>

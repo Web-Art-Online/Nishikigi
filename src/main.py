@@ -8,6 +8,7 @@ if os.geteuid() == 0:
     exit(-1)
 
 os.makedirs("./data", exist_ok=True)
+os.makedirs("./data/bg", exist_ok=True)
 
 
 async def main():

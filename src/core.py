@@ -2,7 +2,6 @@ import asyncio
 import os
 import shutil
 import time
-from typing import Sequence
 
 
 import config
@@ -189,15 +188,9 @@ async def end(msg: PrivateMessage):
             if m["type"] == "image":
                 filepath = f"./data/{ses.id}/{m['data']['file']}"
                 if not os.path.isfile(filepath):
-                    with httpx.stream(
-                        "GET",
-                        m["data"]["url"].replace("https://", "http://"),
-                        timeout=60,
-                    ) as resp:
-                        with open(filepath, mode="bw") as file:
-                            for chunk in resp.iter_bytes():
-                                file.write(chunk)
-                    bot.getLogger().info(f"下载图片: {filepath}")
+                    utils.download(
+                        m["data"]["url"].replace("https://", "http://"), filepath
+                    )
 
     vips = (await bot.call_api("get_group_member_list", {"group_id": config.GROUP}))[
         "data"
@@ -620,6 +613,29 @@ async def delete(msg: GroupMessage):
 
     await msg.reply(f"已删除 {ids}")
     await update_name()
+
+
+@bot.on_cmd("背景", help_msg="设置/查看自己投稿的背景图")
+async def background_img(msg: PrivateMessage):
+    if len(msg.message) == 1:
+        if os.path.exists(f"./data/bg/{msg.sender.user_id}.png"):
+            await msg.reply(
+                f"你的当前背景图是: [CQ:image,file={get_file_url(f'./data/bg/{msg.sender.user_id}.png')}]\n"
+                + "在一条消息内同时发送 #背景 和一张照片来更改背景."
+            )
+            return
+        else:
+            await msg.reply(
+                "你还没有设置背景图哦~\n在一条消息内同时发送 #背景 和一张照片来设置背景吧.\n如图所示"
+                + f"[CQ:image,file={get_file_url(f'help/background.png')}]"
+            )
+            return
+    for m in msg.message:
+        if m["type"] == "image":
+            filepath = f"./data/bg/{msg.sender.user_id}.png"
+            utils.download(m["data"]["url"].replace("https://", "http://"), filepath)
+            await msg.reply(f"已设置背景图")
+            return
 
 
 @bot.on_request()

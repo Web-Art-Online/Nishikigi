@@ -6,6 +6,7 @@ import config
 from botx.models import User
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 import playwright.async_api
+from PIL import Image
 
 
 async def generate_img(
@@ -67,10 +68,28 @@ async def generate_img(
         admin=admin,
         id=id,
         anonymous=anonymous,
+        bg_img=(
+            os.path.abspath(f"./data/bg/{user.user_id}.png")
+            if os.path.exists(f"./data/bg/{user.user_id}.png")
+            else None
+        ),
     )
     with open(f"./data/{id}/page.html", mode="w") as f:
         f.write(output)
-    await screenshoot(id=id, output_path=f"./data/{id}/image.png")
+    tmp_file = f"./data/{id}/tmp.png"
+
+    await screenshoot(id=id, output_path=tmp_file)
+    img = Image.open(tmp_file)
+
+    # 定义裁切区域 (left, upper, right, lower)
+    # 左上角为 (0,0)
+    crop_box = (0, 0, img.size[0] - 64, img.size[1] - 64)
+    # 裁切图片
+    cropped_img = img.crop(crop_box)
+
+    # 保存裁切后的图片
+    cropped_img.save(f"./data/{id}/image.png")
+    os.remove(tmp_file)
     return os.path.abspath(f"./data/{id}/image.png")
 
 
