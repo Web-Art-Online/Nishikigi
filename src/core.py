@@ -615,19 +615,31 @@ async def delete(msg: GroupMessage):
     await update_name()
 
 
-@bot.on_cmd("背景", help_msg="设置/查看自己投稿的背景图")
+@bot.on_cmd(
+    "背景",
+    help_msg="设置/查看自己投稿的背景图\n需要先在”设置-通用-图片、视频、文件和通话-发图方式“中选择半屏相册\n"
+    + f"[CQ:image,file={get_file_url(f'help/setting.jpeg')}][CQ:image,file={get_file_url(f'help/background.jpeg')}]\n"
+    + '发送 "#背景 取消" 即可关闭该功能',
+)
 async def background_img(msg: PrivateMessage):
     if len(msg.message) == 1:
+        parts = msg.raw_message.split(" ")
+        if len(parts) >= 2 and parts[1] == "取消":
+            if os.path.exists(f"./data/bg/{msg.sender.user_id}.png"):
+                os.remove(f"./data/bg/{msg.sender.user_id}.png")
+                await msg.reply("已取消背景图设置")
+                return
         if os.path.exists(f"./data/bg/{msg.sender.user_id}.png"):
             await msg.reply(
                 f"你的当前背景图是: [CQ:image,file={get_file_url(f'./data/bg/{msg.sender.user_id}.png')}]\n"
-                + "在一条消息内同时发送 #背景 和一张照片来更改背景."
+                + "在一条消息内同时发送 #背景 和一张照片来更改背景.\n"
+                + '或发送 "#背景 取消" 来关闭背景'
             )
             return
         else:
             await msg.reply(
-                "你还没有设置背景图哦~\n在一条消息内同时发送 #背景 和一张照片来设置背景吧.\n如图所示"
-                + f"[CQ:image,file={get_file_url(f'help/background.png')}]"
+                "你还没有设置背景图哦~\n在一条消息内同时发送 #背景 和一张照片来设置背景吧.\n需要先在”设置-通用-图片、视频、文件和通话-发图方式“中选择半屏相册\n操作如图所示"
+                + f"[CQ:image,file={get_file_url(f'help/setting.jpeg')}][CQ:image,file={get_file_url(f'help/background.jpeg')}]\n"
             )
             return
     for m in msg.message:
