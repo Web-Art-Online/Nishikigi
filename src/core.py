@@ -3,6 +3,8 @@ import os
 import shutil
 import time
 
+from fastapi.background import P
+
 
 import config
 from models import Article, Session, Status
@@ -571,6 +573,47 @@ async def clear():
 @scheduler.scheduled_job(IntervalTrigger(hours=config.HEARTBEAT_INTERVAL))
 async def heartbeat():
     await bot.send_group(config.GROUP, "🤖 Nishikigi Heartbeat")
+
+
+queue = []
+QUEUE_SIZE = 10
+
+
+@scheduler.scheduled_job(IntervalTrigger(hours=1))
+async def qzone_like():
+    qzone = await bot.get_qzone()
+    for i in range(3, -1, -1):
+        feeds = await qzone.get_feeds(page=i)
+        flag = False
+        for e in feeds:
+            if e.key in queue:
+                flag = True
+                break
+            if len(queue) >= QUEUE_SIZE:
+                queue.pop()
+            queue.insert(0, e.key)
+            await qzone.like(e)
+        if flag:
+            break
+
+
+@scheduler.scheduled_job(IntervalTrigger(days=1))
+async def profile_like():
+    l = (await bot.call_api("get_friend_list"))["data"]
+    targets = random.choices(l, k=max(config.PROFILE_LIKES, len(l)))
+    for t in targets:
+        await bot.call_api(
+            "send_like",
+            params={"user_id": t["user_id"], "times": random.randint(1, 10)},
+        )
+
+
+@bot.on_cmd("点赞", help_msg="给 Qzone 点赞", targets=[config.GROUP])
+async def like(msg: GroupMessage):
+    await msg.reply("开始点赞")
+    await qzone_like()
+    await profile_like()
+    await msg.reply("结束点赞")
 
 
 @bot.on_cmd(
