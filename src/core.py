@@ -600,7 +600,7 @@ async def qzone_like():
 @scheduler.scheduled_job(IntervalTrigger(days=1))
 async def profile_like():
     l = (await bot.call_api("get_friend_list"))["data"]
-    targets = random.choices(l, k=max(config.PROFILE_LIKES, len(l)))
+    targets = random.choices(l, k=min(config.PROFILE_LIKES, len(l)))
     for t in targets:
         await bot.call_api(
             "send_like",
