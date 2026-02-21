@@ -576,14 +576,14 @@ async def heartbeat():
 
 
 queue = []
-QUEUE_SIZE = 10
+QUEUE_SIZE = 20
 
 
 @scheduler.scheduled_job(IntervalTrigger(hours=1))
 async def qzone_like():
     qzone = await bot.get_qzone()
     for i in range(3, -1, -1):
-        feeds = await qzone.get_feeds(page=i)
+        feeds = await qzone.get_feeds(page=i, length=20)
         flag = False
         for e in feeds:
             if e.key in queue:
@@ -593,6 +593,7 @@ async def qzone_like():
                 queue.pop()
             queue.insert(0, e.key)
             await qzone.like(e)
+            bot.getLogger().info(f"给 {e.nickname}({e.uin}) 的动态 {e.key} 点赞")
         if flag:
             break
 
@@ -600,7 +601,7 @@ async def qzone_like():
 @scheduler.scheduled_job(IntervalTrigger(days=1))
 async def profile_like():
     l = (await bot.call_api("get_friend_list"))["data"]
-    targets = random.choices(l, k=max(config.PROFILE_LIKES, len(l)))
+    targets = random.choices(l, k=min(config.PROFILE_LIKES, len(l)))
     for t in targets:
         await bot.call_api(
             "send_like",
