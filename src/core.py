@@ -523,9 +523,24 @@ async def publish(ids: list[str]) -> list[str]:
             Article.id == id
         ).execute()
         await bot.send_private(
-            Article.get_by_id(id).sender_id, f"您的投稿 #{id} 已被推送😋"
+            Article.get_by_id(id).sender_id, f"您的投稿 #{id} 已被推送到 Qzone😋"
         )
     return names
+
+
+async def publish_guild(id: str) -> str:
+    guild = await bot.get_guild()
+    image = await guild.upload_image(f"./data/{id}/image.png")
+    mid = await guild.publish(
+        guild_id=config.GUILD_ID,  # type: ignore
+        channel_id=config.CHANNEL_ID,  # type: ignore
+        text=f"#{id}",
+        images=[image],
+    )
+    await bot.send_private(
+        Article.get_by_id(id).sender_id, f"您的投稿 #{id} 已被推送到 频道😋"
+    )
+    return mid
 
 
 async def update_name():
@@ -727,6 +742,10 @@ async def approve_article(ids: list, operator: int, is_emoji: bool = False):
         await bot.send_group(
             config.GROUP, f"投稿 #{id} 进入待发送队列\n审核人: {', '.join(operators)}"
         )
+
+        await bot.send_group(config.GROUP, f"投稿 #{id} 正在推送到 频道")
+        mid = await publish_guild(id)
+        await bot.send_group(config.GROUP, f"投稿 #{id} 已推送到 频道\nmid: {mid}")
 
         if article.single:
             await bot.send_group(group=config.GROUP, msg=f"开始推送 #{id}")
