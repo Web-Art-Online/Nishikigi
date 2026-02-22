@@ -540,6 +540,7 @@ async def publish_guild(id: str) -> str:
     await bot.send_private(
         Article.get_by_id(id).sender_id, f"您的投稿 #{id} 已被推送到 频道😋"
     )
+    Article.update({"mid": mid}).where(Article.id == id).execute()
     return mid
 
 
@@ -666,6 +667,13 @@ async def delete(msg: GroupMessage):
                     continue
                 await qzone.delete_image(image)
 
+            guild = await bot.get_guild()
+            if article.mid and config.GUILD_ID:
+                await guild.delete_feed(
+                    guild_id=config.GUILD_ID,  # type: ignore
+                    feed_id=article.mid,
+                )
+
             await bot.send_private(
                 article.sender_id, f"你的投稿 #{id} 已被管理员删除😵‍💫"
             )
@@ -742,10 +750,18 @@ async def approve_article(ids: list, operator: int, is_emoji: bool = False):
         await bot.send_group(
             config.GROUP, f"投稿 #{id} 进入待发送队列\n审核人: {', '.join(operators)}"
         )
-
-        await bot.send_group(config.GROUP, f"投稿 #{id} 正在推送到 频道")
-        mid = await publish_guild(id)
-        await bot.send_group(config.GROUP, f"投稿 #{id} 已推送到 频道\nmid: {mid}")
+        if config.GUILD_ID and config.CHANNEL_ID:
+            await bot.send_group(config.GROUP, f"投稿 #{id} 正在推送到 频道")
+            try:
+                mid = await publish_guild(id)
+                await bot.send_group(
+                    config.GROUP, f"投稿 #{id} 已推送到 频道\nmid: {mid}"
+                )
+            except Exception as e:
+                bot.getLogger().exception(
+                    f"推送投稿 #{id} 到频道失败: {e}", stack_info=True
+                )
+                await bot.send_group(config.GROUP, f"投稿 #{id} 推送失败: {e}")
 
         if article.single:
             await bot.send_group(group=config.GROUP, msg=f"开始推送 #{id}")

@@ -50,8 +50,9 @@ class Article(Model):
     single = BooleanField()
 
     status = EnumField(Status, default=Status.CREATED)
-
     approve = TextField(null=True)
+
+    mid = TextField(null=True)
 
     class Meta:
         database = db
