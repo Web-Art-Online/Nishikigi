@@ -465,8 +465,10 @@ async def status(msg: GroupMessage):
 async def link(msg: GroupMessage):
     clientkey = (await bot.call_api("get_clientkey"))["data"]["clientkey"]
     await msg.reply(
-        f"http://ssl.ptlogin2.qq.com/jump?ptlang=1033&clientuin={bot.me.user_id}&clientkey={clientkey}"
-        + f"&u1=https%3A%2F%2Fuser.qzone.qq.com%2F{bot.me.user_id}%2Finfocenter&keyindex=19"
+        f"Qzone: http://ssl.ptlogin2.qq.com/jump?ptlang=1033&clientuin={bot.me.user_id}&clientkey={clientkey}"
+        + f"&u1=https%3A%2F%2Fuser.qzone.qq.com%2F{bot.me.user_id}%2Finfocenter&keyindex=19\n"
+        + f"Guild: http://ssl.ptlogin2.qq.com/jump?ptlang=1033&clientuin={bot.me.user_id}&clientkey={clientkey}"
+        + "&u1=https%3A%2F%2Fpd.qq.com%2F&keyindex=19"
     )
 
 
