@@ -605,15 +605,20 @@ async def qzone_like():
     for i in range(3, -1, -1):
         feeds = await qzone.get_feeds(page=i, length=20)
         flag = False
-        for e in feeds:
-            if e.key in queue:
+        for f in feeds:
+            if f.key in queue:
                 flag = True
                 break
+            try:
+                await qzone.like(f)
+            except Exception as e:
+                bot.getLogger().exception(
+                    f"给 {f.nickname}({f.uin}) 的动态 {f.key} 点赞失败: {e}"
+                )
             if len(queue) >= QUEUE_SIZE:
                 queue.pop()
-            queue.insert(0, e.key)
-            await qzone.like(e)
-            bot.getLogger().info(f"给 {e.nickname}({e.uin}) 的动态 {e.key} 点赞")
+            queue.insert(0, f.key)
+            bot.getLogger().info(f"给 {f.nickname}({f.uin}) 的动态 {f.key} 点赞")
         if flag:
             break
 
