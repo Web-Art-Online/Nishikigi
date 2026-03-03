@@ -28,13 +28,15 @@ from botx.models import (
     FriendRequest,
     EmojiLike,
 )
-import httpx
 
 bot = Bot(
-    ws_uri=config.WS_URL, token=config.ACCESS_TOKEN, log_level="DEBUG", msg_cd=0.5
+    ws_uri=config.WS_URL,
+    token=config.ACCESS_TOKEN,
+    log_level=config.LOG_LEVEL,
+    msg_cd=0.25,
 )
 
-token = hex(random.randint(0, 2 << 128))[2:]
+token = hex(random.randint(0, 1 << 128))[2:]
 
 app = FastAPI()
 

@@ -3,6 +3,8 @@ import dotenv
 
 dotenv.load_dotenv()
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
 # 审核群
 GROUP = int(os.getenv("GROUP", "0"))
 
