@@ -606,7 +606,7 @@ async def qzone_like():
         feeds = await qzone.get_feeds(page=i, length=20)
         flag = False
         for f in feeds:
-            if f.uin == 0:  # 广告
+            if f.uin == "0":  # 广告
                 continue
             if f.key in queue:
                 flag = True
