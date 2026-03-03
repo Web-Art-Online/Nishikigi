@@ -67,7 +67,7 @@ scheduler = AsyncIOScheduler()
 async def error(context: dict, data: dict):
     exc = context.get("exception")
     tb = "".join(traceback.format_exception(exc)) if exc is not None else "no traceback"
-    if "user_id" in data:
+    if data and "user_id" in data:
         await bot.send_private(
             data["user_id"],
             f"出了一点小问题😵‍💫:\n\n{str(exc)}",
