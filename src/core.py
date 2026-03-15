@@ -2,17 +2,14 @@ import asyncio
 import os
 import shutil
 import time
+import random
+import traceback
 
-from fastapi.background import P
-
-
+import agent
 import config
 from models import Article, Session, Status
 import image
-import random
-import traceback
 import utils
-import agent
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -324,6 +321,13 @@ async def recall(r: PrivateRecall):
     if not ses:
         return
     ses.contents = [c for c in ses.contents if c[0]["id"] != r.message_id]
+    for c in ses.contents:
+        if c[0]["id"] == r.message_id:
+            for m in c:
+                if m["type"] == "image":
+                    path = f"./data/{ses.id}/{m['data']['file']}"
+                    if os.path.isfile(path):
+                        os.remove(path)
 
 
 # @bot.on_notice()
@@ -401,7 +405,7 @@ async def push(msg: GroupMessage):
                 await msg.reply(f"投稿 #{id} 不存在或已被推送或未通过审核")
                 return
         await msg.reply(f"开始推送 {ids}")
-        tid = await publish(ids)
+        tid = await publish_qzone(ids)
         await msg.reply(f"已推送 {ids}\ntid: {tid}")
         await update_name()
 
@@ -513,14 +517,31 @@ async def emoji_approve(notice: EmojiLike):
                     )
 
 
-async def publish(ids: list[str]) -> list[str]:
+async def publish_qzone(ids: list[str]) -> list[str]:
     ids.reverse()
 
     qzone = await bot.get_qzone()
-    names = await qzone.upload_raw_image(
-        album_name=config.ALBUM,
-        file_path=list(map(lambda id: f"./data/{id}/image.png", ids)),
-    )
+    if len(ids) == 1:
+        folder = f"./data/{ids[0]}"
+        images = [
+            os.path.join(folder, f)
+            for f in os.listdir(folder)
+            if (f.endswith(".png") and f != "image.png")
+        ]
+        images.sort(key=lambda x: os.path.getmtime(x))
+        names = [
+            ",".join(
+                await qzone.upload_raw_image(
+                    album_name=config.ALBUM,
+                    file_path=[os.path.join(folder, "image.png")] + images,
+                )
+            )
+        ]
+    else:
+        names = await qzone.upload_raw_image(
+            album_name=config.ALBUM,
+            file_path=list(map(lambda id: f"./data/{id}/image.png", ids)),
+        )
 
     for i, id in enumerate(ids):
         Article.update({"tid": names[i], "status": Status.PUBLISHED}).where(
@@ -534,13 +555,26 @@ async def publish(ids: list[str]) -> list[str]:
 
 async def publish_guild(id: str) -> str:
     guild = await bot.get_guild()
-    image = await guild.upload_image(f"./data/{id}/image.png")
+    folder = f"./data/{id}"
+
+    raw_images = [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if (f.endswith(".png") and f != "image.png")
+    ]
+    raw_images.sort(key=lambda x: os.path.getmtime(x))
+
+    images = [await guild.upload_image(f"./data/{id}/image.png")]
+    for img in raw_images:
+        images.append(await guild.upload_image(img))
+
     mid = await guild.publish(
         guild_id=config.GUILD_ID,  # type: ignore
         channel_id=config.CHANNEL_ID,  # type: ignore
         text=f"#{id}",
-        images=[image],
+        images=images,
     )
+
     await bot.send_private(
         Article.get_by_id(id).sender_id, f"您的投稿 #{id} 已被推送到 频道😋"
     )
@@ -654,6 +688,11 @@ async def delete(msg: GroupMessage):
             await msg.reply("请带上要删除的投稿id")
             return
 
+        qzone = await bot.get_qzone()
+        album = await qzone.get_album(config.ALBUM)
+        if album == None:
+            bot.getLogger().error(f"无法找到相册 {config.ALBUM}")
+            return
         ids = parts[1:]
         for id in ids:
             article = Article.get_or_none(
@@ -667,21 +706,17 @@ async def delete(msg: GroupMessage):
                 shutil.rmtree(f"./data/{id}")
 
             if article.status == Status.PUBLISHED:
-                qzone = await bot.get_qzone()
-                album = await qzone.get_album(config.ALBUM)
-                if album == None:
-                    bot.getLogger().error(f"无法找到相册 {config.ALBUM}")
-                    continue
-                image = await qzone.get_image(album_id=album, name=article.tid)
-                if image == None:
-                    await msg.reply(f"无法找到投稿 #{id} 对应的空间动态图片")
-                    continue
-                await qzone.delete_image(image)
+                for i in article.tid.split(","):
+                    image = await qzone.get_image(album_id=album, name=i)
+                    if image == None:
+                        await msg.reply(f"无法找到投稿 #{id} 对应的空间动态图片")
+                        continue
+                    await qzone.delete_image(image)
 
             guild = await bot.get_guild()
             if article.mid and config.GUILD_ID:
                 await guild.delete_feed(
-                    guild_id=config.GUILD_ID,  # type: ignore
+                    guild_id=config.GUILD_ID,
                     feed_id=article.mid,
                 )
 
@@ -776,7 +811,7 @@ async def approve_article(ids: list, operator: int, is_emoji: bool = False):
 
         if article.single:
             await bot.send_group(group=config.GROUP, msg=f"开始推送 #{id}")
-            await publish([id])
+            await publish_qzone([id])
             await bot.send_group(group=config.GROUP, msg=f"投稿 #{id} 已经单发")
             continue
         else:
@@ -807,7 +842,7 @@ async def approve_article(ids: list, operator: int, is_emoji: bool = False):
                 group=config.GROUP,
                 msg=f"队列已积压{len(articles)}个稿件, 将推送前{config.QUEUE}个稿件...",
             )
-            tid = await publish(list(map(lambda a: a.id, articles)))
+            tid = await publish_qzone(list(map(lambda a: a.id, articles)))
             await bot.send_group(
                 group=config.GROUP,
                 msg=f"已推送{list(map(lambda a: a.id, articles))}\ntid: {tid}",
