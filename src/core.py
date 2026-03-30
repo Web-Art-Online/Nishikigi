@@ -159,7 +159,7 @@ async def article(msg: PrivateMessage):
 
     if "单发" in parts:
         await msg.reply(
-            "单发大概率被驳回! \n都单发的话, 大家的空间就会被挤满😵‍💫\n节约你我时间, 无需单发, 发送:  \n\n#取消\n\n后再重新投稿"
+            "单发大概率被驳回! \n都单发的话, 大家的空间就会被挤满😵‍💫\n节约你我时间, 如果无需单发, 发送:  \n\n#取消\n\n后再重新投稿"
         )
     if anonymous:
         await msg.reply(
@@ -183,6 +183,8 @@ async def end(msg: PrivateMessage):
         return
     await msg.reply("正在生成预览图🚀\n请稍等片刻")
     ses = sessions[msg.sender]
+
+    bot.getLogger().debug(ses.contents)
 
     for content in ses.contents:
         for m in content:
@@ -320,6 +322,7 @@ async def recall(r: PrivateRecall):
     ses = sessions.get(User(nickname=None, user_id=r.user_id))  # type: ignore
     if not ses:
         return
+    bot.getLogger().info(f"用户 {r.user_id} 撤回了一条消息: {r.message_id}")
     ses.contents = [c for c in ses.contents if c[0]["id"] != r.message_id]
     for c in ses.contents:
         if c[0]["id"] == r.message_id:
@@ -529,11 +532,13 @@ async def publish_qzone(ids: list[str]) -> list[str]:
             if (f.endswith(".png") and f != "image.png")
         ]
         images.sort(key=lambda x: os.path.getmtime(x))
+        upload_images = [os.path.join(folder, "image.png")] + images
+        upload_images.reverse()
         names = [
             ",".join(
                 await qzone.upload_raw_image(
                     album_name=config.ALBUM,
-                    file_path=[os.path.join(folder, "image.png")] + images,
+                    file_path=upload_images,
                 )
             )
         ]
