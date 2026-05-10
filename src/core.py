@@ -191,7 +191,7 @@ async def end(msg: PrivateMessage):
             if m["type"] == "image":
                 filepath = f"./data/{ses.id}/{m['data']['file']}"
                 if not os.path.isfile(filepath):
-                    utils.download(
+                    await utils.download(
                         m["data"]["url"].replace("https://", "http://"), filepath
                     )
 
@@ -763,7 +763,9 @@ async def background_img(msg: PrivateMessage):
     for m in msg.message:
         if m["type"] == "image":
             filepath = f"./data/bg/{msg.sender.user_id}.png"
-            utils.download(m["data"]["url"].replace("https://", "http://"), filepath)
+            await utils.download(
+                m["data"]["url"].replace("https://", "http://"), filepath
+            )
             await msg.reply(f"已设置背景图")
             return
 
