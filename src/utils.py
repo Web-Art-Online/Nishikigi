@@ -11,12 +11,11 @@ def to_list(l):
     return list(map(lambda a: a.id, l))
 
 
-def download(url: str, filepath: str):
-    with httpx.stream(
-        "GET",
-        url,
-        timeout=60,
-    ) as resp:
-        with open(filepath, mode="bw") as file:
-            for chunk in resp.iter_bytes():
-                file.write(chunk)
+async def download(url: str, filepath: str):
+    async with httpx.AsyncClient(timeout=60) as client:
+        async with client.stream("GET", url) as resp:
+            resp.raise_for_status()
+
+            with open(filepath, mode="wb") as file:
+                async for chunk in resp.aiter_bytes():
+                    file.write(chunk)
