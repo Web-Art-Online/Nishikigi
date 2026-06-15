@@ -49,7 +49,7 @@ def get_file_url(path: str):
 def get_image(p: str, t: str):
     if t != token:
         raise HTTPException(status_code=401, detail="Nothing.")
-    return FileResponse(path=p)
+    return FileResponse(path=resolve_public_file(p))
 
 
 sessions: dict[User, Session] = {}
@@ -60,6 +60,20 @@ start_time = time.time()
 lock = asyncio.Lock()
 
 scheduler = AsyncIOScheduler()
+
+
+def resolve_public_file(path: str) -> str:
+    public_roots = [
+        os.path.abspath("./data"),
+        os.path.abspath("./help"),
+        os.path.abspath("./face"),
+    ]
+    requested = os.path.abspath(path)
+    if not any(os.path.commonpath([requested, root]) == root for root in public_roots):
+        raise HTTPException(status_code=403, detail="Forbidden.")
+    if not os.path.isfile(requested):
+        raise HTTPException(status_code=404, detail="Not found.")
+    return requested
 
 
 @bot.on_error()
@@ -98,20 +112,8 @@ async def error(context: dict, data: dict):
 async def article(msg: PrivateMessage):
     raw = msg.raw_message.strip()
 
-    # 定义严格允许的投稿命令
-    valid_options = [
-        "#投稿",
-        "#投稿 单发",
-        "#投稿 匿名",
-        "#投稿 单发 匿名",
-        "＃投稿",
-        "＃投稿 单发",
-        "＃投稿 匿名",
-        "＃投稿 单发 匿名",
-    ]
-
     # 如果命令不在允许列表中, 直接提示并返回
-    if raw not in valid_options:
+    if not agent.is_valid_article_command(raw):
         await msg.reply(
             "❌ 投稿命令格式错误! \n"
             "正确格式示例:  \n"
@@ -123,13 +125,14 @@ async def article(msg: PrivateMessage):
         )
         return
 
-    anonymous = "匿名" in raw
+    command = agent.normalize_command(raw)
+    anonymous = "匿名" in command
 
     if msg.sender in sessions:
         await msg.reply("你还有投稿未结束🤔\n请先输入 #结束 来结束当前投稿")
         return
 
-    parts = raw.split(" ")
+    parts = command.split(" ")
     id = Article.create(
         sender_id=msg.sender.user_id,
         sender_name=msg.sender.nickname,
@@ -319,18 +322,20 @@ async def content(msg: PrivateMessage):
 
 @bot.on_notice()
 async def recall(r: PrivateRecall):
+    print(f"用户 {r.user_id} 撤回了一条消息, 但未找到对应的会话")
     ses = sessions.get(User(nickname=None, user_id=r.user_id))  # type: ignore
     if not ses:
         return
     bot.getLogger().info(f"用户 {r.user_id} 撤回了一条消息: {r.message_id}")
-    ses.contents = [c for c in ses.contents if c[0]["id"] != r.message_id]
-    for c in ses.contents:
-        if c[0]["id"] == r.message_id:
-            for m in c:
-                if m["type"] == "image":
-                    path = f"./data/{ses.id}/{m['data']['file']}"
-                    if os.path.isfile(path):
-                        os.remove(path)
+    removed = [c for c in ses.contents if c and c[0]["id"] == r.message_id]
+    ses.contents = [c for c in ses.contents if not c or c[0]["id"] != r.message_id]
+    print(f"撤回后内容: {ses.contents}")
+    for c in removed:
+        for m in c:
+            if m["type"] == "image":
+                path = f"./data/{ses.id}/{m['data']['file']}"
+                if os.path.isfile(path):
+                    os.remove(path)
 
 
 # @bot.on_notice()
@@ -345,7 +350,7 @@ async def recall(r: PrivateRecall):
 )
 async def approve(msg: GroupMessage):
     async with lock:
-        parts = msg.raw_message.split(" ")
+        parts = msg.raw_message.split()
         if len(parts) < 2:
             await msg.reply("请带上要通过的投稿编号")
             return
@@ -361,7 +366,7 @@ async def approve(msg: GroupMessage):
 )
 async def refuse(msg: GroupMessage):
     async with lock:
-        parts = msg.raw_message.split(" ")
+        parts = msg.raw_message.split()
         if len(parts) < 3:
             await msg.reply("请带上要驳回的投稿和理由")
             return
@@ -394,7 +399,7 @@ async def refuse(msg: GroupMessage):
 )
 async def push(msg: GroupMessage):
     async with lock:
-        parts = msg.raw_message.split(" ")
+        parts = msg.raw_message.split()
         if len(parts) < 2:
             await msg.reply("请带上要通过的投稿id")
             return
@@ -417,7 +422,7 @@ async def push(msg: GroupMessage):
     "查看", help_msg="查看投稿, 可以查看多个, 如 #查看 1 2 3", targets=[config.GROUP]
 )
 async def view(msg: GroupMessage):
-    parts = msg.raw_message.split(" ")
+    parts = msg.raw_message.split()
     if len(parts) < 2:
         await msg.reply("请带上要通过的投稿id")
         return
@@ -455,7 +460,7 @@ async def view(msg: GroupMessage):
             + f"状态: {status}\n"
             + (
                 ""
-                if status == Status.CONFRIMED or status == Status.CREATED
+                if article.status in (Status.CONFRIMED, Status.CREATED)
                 else f"审核人: {article.approve}"
             ),
         )
@@ -487,7 +492,7 @@ async def link(msg: GroupMessage):
     targets=[config.GROUP],
 )
 async def reply(msg: GroupMessage):
-    parts = msg.raw_message.split(" ")
+    parts = msg.raw_message.split()
     if len(parts) < 3:
         await msg.reply("请带上你想回复的人和内容")
         return
@@ -688,7 +693,7 @@ async def like(msg: GroupMessage):
 )
 async def delete(msg: GroupMessage):
     async with lock:
-        parts = msg.raw_message.split(" ")
+        parts = msg.raw_message.split()
         if len(parts) < 2:
             await msg.reply("请带上要删除的投稿id")
             return
@@ -741,7 +746,7 @@ async def delete(msg: GroupMessage):
 )
 async def background_img(msg: PrivateMessage):
     if len(msg.message) == 1:
-        parts = msg.raw_message.split(" ")
+        parts = msg.raw_message.split()
         if len(parts) >= 2 and parts[1] == "取消":
             if os.path.exists(f"./data/bg/{msg.sender.user_id}.png"):
                 os.remove(f"./data/bg/{msg.sender.user_id}.png")

@@ -5,40 +5,48 @@ from botx.models import PrivateMessage
 import config
 
 
+ARTICLE_COMMANDS = {
+    "#投稿",
+    "#投稿 单发",
+    "#投稿 匿名",
+    "#投稿 单发 匿名",
+}
+
+BASIC_COMMANDS = {
+    "#结束",
+    "#确认",
+    "#取消",
+    "#帮助",
+    "#背景",
+}
+
+PREFIX_COMMANDS = {
+    "#反馈",
+}
+
+
+def normalize_command(raw: str) -> str:
+    return " ".join(raw.strip().replace("＃", "#").split())
+
+
+def is_valid_article_command(raw: str) -> bool:
+    return normalize_command(raw) in ARTICLE_COMMANDS
+
+
 def is_known_command(raw: str) -> bool:
     if not raw:
         return False
-    s = raw.strip()
+    s = normalize_command(raw)
 
-    # 仅识别以下完全匹配的命令
-    valid_cmds = {
-        "#投稿",
-        "#投稿 匿名",
-        "#投稿 单发",
-        "#投稿 单发 匿名",
-        "#结束",
-        "#确认",
-        "#取消",
-        "#帮助",
-        "#反馈",
-        "#背景",
-        "＃投稿",
-        "＃投稿 匿名",
-        "＃投稿 单发",
-        "＃投稿 单发 匿名",
-        "＃结束",
-        "＃确认",
-        "＃取消",
-        "＃帮助",
-        "＃反馈",
-        "＃背景",
-    }
-    # TODO 不要写死
-
-    return any(s.startswith(cmd) for cmd in valid_cmds)
+    if s in ARTICLE_COMMANDS or s in BASIC_COMMANDS:
+        return True
+    return any(s.startswith(command + " ") or s == command for command in PREFIX_COMMANDS)
 
 
 async def ai_suggest_intent(raw: str) -> dict:
+    if not config.AGENT_ROUTER_BASE or not config.AGENT_ROUTER_KEY:
+        return {"intent_candidates": []}
+
     prompt = (
         "你是“苏州实验中学校墙”的智能助手, 任务是把用户短文本映射为墙的命令或友好回复。"
         '最终请返回 JSON: {"intent_candidates":[{"label":"","suggestion":"","confidence":"","reason":""}]}\n\n'

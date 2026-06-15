@@ -1,27 +1,23 @@
 from datetime import datetime
 import os
 
-import config
-
 from botx.models import User
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 import playwright.async_api
 from PIL import Image
 
 
+env = Environment(
+    loader=FileSystemLoader("templates"),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    autoescape=select_autoescape(["html"]),
+)
+
+
 async def generate_img(
     id: int, user: User, anonymous: bool, contents: list, admin: bool = False
 ) -> str:
-    env = Environment(
-        loader=FileSystemLoader("templates"),
-        trim_blocks=True,
-        lstrip_blocks=True,
-        autoescape=select_autoescape(
-            [
-                "html",
-            ]
-        ),
-    )
     _contents = []
     for items in contents:
         values = [
@@ -74,40 +70,40 @@ async def generate_img(
             else None
         ),
     )
-    with open(f"./data/{id}/page.html", mode="w") as f:
+    with open(f"./data/{id}/page.html", mode="w", encoding="utf-8") as f:
         f.write(output)
     tmp_file = f"./data/{id}/tmp.png"
 
     await screenshoot(id=id, output_path=tmp_file)
-    img = Image.open(tmp_file)
-
-    # 定义裁切区域 (left, upper, right, lower)
-    # 左上角为 (0,0)
-    crop_box = (0, 0, img.size[0] - 64, img.size[1] - 64)
-    # 裁切图片
-    cropped_img = img.crop(crop_box)
-
-    # 保存裁切后的图片
-    cropped_img.save(f"./data/{id}/image.png")
-    os.remove(tmp_file)
+    try:
+        with Image.open(tmp_file) as img:
+            # 定义裁切区域 (left, upper, right, lower), 左上角为 (0,0)
+            crop_box = (0, 0, img.size[0] - 64, img.size[1] - 64)
+            cropped_img = img.crop(crop_box)
+            cropped_img.save(f"./data/{id}/image.png")
+    finally:
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
     return os.path.abspath(f"./data/{id}/image.png")
 
 
 async def screenshoot(id: int, output_path: str):
     async with playwright.async_api.async_playwright() as p:
         browser = await p.chromium.launch(headless=True, chromium_sandbox=True)
-        page = await browser.new_page(
-            viewport={"width": 720, "height": 720},
-            device_scale_factor=3,
-        )
-        await page.goto(
-            f"file://{os.path.abspath(f"./data/{id}/page.html")}",
-            wait_until="networkidle",
-        )
-        await page.screenshot(
-            type="png",
-            full_page=True,
-            path=output_path,
-            animations="disabled",
-        )
-        await browser.close()
+        try:
+            page = await browser.new_page(
+                viewport={"width": 720, "height": 720},
+                device_scale_factor=3,
+            )
+            await page.goto(
+                f"file://{os.path.abspath(f"./data/{id}/page.html")}",
+                wait_until="networkidle",
+            )
+            await page.screenshot(
+                type="png",
+                full_page=True,
+                path=output_path,
+                animations="disabled",
+            )
+        finally:
+            await browser.close()
